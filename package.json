@@ -10,11 +10,12 @@
     "start": "NODE_ENV=production tsx server.ts",
     "check": "biome check --write .",
     "icons": "node scripts/make-icons.mjs",
+    "fix:wincodesign": "node scripts/fix-wincodesign.mjs",
     "compile:electron": "tsc --project electron/tsconfig.json",
     "electron:dev": "concurrently -k -n next,electron -c blue,green \"npm run dev\" \"wait-on http-get://localhost:3000 && npm run compile:electron && cross-env WAB_DEV_URL=http://localhost:3000 electron .\"",
-    "dist": "npm run icons && npm run build && npm run compile:electron && electron-builder",
-    "dist:dir": "npm run icons && npm run build && npm run compile:electron && electron-builder --dir",
-    "publish": "npm run icons && npm run build && npm run compile:electron && electron-builder --publish always"
+    "dist": "npm run fix:wincodesign && npm run icons && npm run build && npm run compile:electron && electron-builder",
+    "dist:dir": "npm run fix:wincodesign && npm run icons && npm run build && npm run compile:electron && electron-builder --dir",
+    "publish": "npm run fix:wincodesign && npm run icons && npm run build && npm run compile:electron && electron-builder --publish always"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",

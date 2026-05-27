@@ -43,6 +43,11 @@ $env:GH_TOKEN = "ghp_..."
 npm run publish
 ```
 
+`dist` / `dist:dir` / `publish` 스크립트는 자동으로 `fix:wincodesign`을 먼저 실행함 —
+electron-builder가 macOS 코드사이닝용 dylib 심볼릭 링크 추출에 실패하는 문제(Windows에서
+관리자 권한 또는 개발자 모드 없으면 발생)를 우회하기 위해 darwin/ 폴더를 제외하고 캐시를
+미리 만들어둠.
+
 ## 데이터 위치
 
 - 세션: `%APPDATA%\WAB\auth\`
