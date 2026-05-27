@@ -30,10 +30,9 @@ export function ChatList({
     return (
       <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
         <div className="mb-2 text-3xl opacity-40">💬</div>
-        <p className="text-xs text-wa-text-muted">
-          대화가 아직 없어요.
-          <br />
-          동기화에 잠시 시간이 걸릴 수 있습니다.
+        <p className="text-xs leading-relaxed text-wa-text-muted">
+          기록 동기화는 꺼져 있어요.
+          <br />앱 구동 이후 들어오는 메시지만 표시됩니다.
         </p>
       </div>
     );

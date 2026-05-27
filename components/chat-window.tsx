@@ -319,11 +319,16 @@ function MessageBubble({
   const isOut = message.fromMe;
   return (
     <div
-      className={`group flex items-start gap-1.5 ${isOut ? "justify-end" : "justify-start"}`}
+      className={`group flex w-full items-start gap-1.5 ${
+        isOut ? "justify-end" : "justify-start"
+      }`}
     >
       {isOut ? <ReplyHandle onReply={onReply} side="out" /> : null}
       <div
-        className={`relative max-w-[75%] rounded-lg px-2.5 py-1.5 text-[14px] shadow-sm ${
+        // min-w-0 lets the bubble actually shrink below its content's intrinsic
+        // width inside the flex row, so max-w-[...] is respected for long text.
+        // The min() cap keeps bubbles readable even on very wide windows.
+        className={`relative min-w-0 max-w-[min(75%,640px)] rounded-lg px-2.5 py-1.5 text-[14px] shadow-sm ${
           isOut ? "rounded-tr-sm bg-wa-bubble-out" : "rounded-tl-sm bg-wa-bubble-in"
         } ${isLatest ? "bubble-in" : ""}`}
       >
@@ -420,7 +425,9 @@ function MessageContent({
 }) {
   if (message.type === "text" && message.text) {
     return (
-      <div className="whitespace-pre-wrap break-words leading-relaxed">{message.text}</div>
+      <div className="whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
+        {message.text}
+      </div>
     );
   }
   if (message.media?.url) {
@@ -463,7 +470,7 @@ function MediaContent({
             className="max-h-80 max-w-full rounded-md object-contain"
           />
           {message.text ? (
-            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">
+            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
               {message.text}
             </div>
           ) : null}
@@ -475,7 +482,7 @@ function MediaContent({
           {/* biome-ignore lint/a11y/useMediaCaption: WhatsApp video has no captions track */}
           <video controls src={url} className="max-h-80 max-w-full rounded-md" />
           {message.text ? (
-            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">
+            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
               {message.text}
             </div>
           ) : null}
