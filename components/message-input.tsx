@@ -6,13 +6,13 @@ import type { MessageItem } from "@/lib/whatsapp/types";
 export function MessageInput({
   onSend,
   onTyping,
-  onSendMedia,
+  onFilesSelected,
   replyTo,
   onCancelReply,
 }: {
   onSend: (text: string) => void;
   onTyping: (isTyping: boolean) => void;
-  onSendMedia: (fileName: string, mimeType: string, data: ArrayBuffer, caption?: string) => void;
+  onFilesSelected: (files: File[]) => void;
   replyTo: MessageItem | null;
   onCancelReply: () => void;
 }) {
@@ -55,31 +55,24 @@ export function MessageInput({
     if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
   }
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
-    if (file.size > 100 * 1024 * 1024) {
-      alert("100MB 이하 파일만 전송 가능합니다.");
-      return;
-    }
-    try {
-      const buffer = await file.arrayBuffer();
-      const caption = text.trim() || undefined;
-      onSendMedia(file.name, file.type || "application/octet-stream", buffer, caption);
-      setText("");
-      setTyping(false);
-    } catch (err) {
-      console.error("file read failed", err);
-      alert("파일을 읽는 데 실패했습니다.");
-    }
+    if (files.length === 0) return;
+    onFilesSelected(files);
   }
 
   return (
     <div className="border-t border-wa-border bg-wa-panel-soft">
       {replyTo ? <ReplyPreview message={replyTo} onCancel={onCancelReply} /> : null}
       <div className="flex items-center gap-2 px-3 py-2.5">
-        <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFile}
+        />
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}

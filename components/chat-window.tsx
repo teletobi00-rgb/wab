@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ChatInfo,
   MessageItem,
@@ -9,6 +9,8 @@ import type {
   QuotedInfo,
 } from "@/lib/whatsapp/types";
 import { Avatar } from "./avatar";
+import { ImageLightbox } from "./image-lightbox";
+import { MediaPreview, type PendingMedia } from "./media-preview";
 import { MessageInput } from "./message-input";
 
 export function ChatWindow({
@@ -35,6 +37,10 @@ export function ChatWindow({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [dragDepth, setDragDepth] = useState(0);
   const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
+  const [pending, setPending] = useState<PendingMedia[] | null>(null);
+  const [pendingIndex, setPendingIndex] = useState(0);
+  const [pendingCaption, setPendingCaption] = useState("");
+  const [lightbox, setLightbox] = useState<{ url: string; fileName?: string } | null>(null);
   const isDragging = dragDepth > 0;
 
   useEffect(() => {
@@ -45,22 +51,87 @@ export function ChatWindow({
   useEffect(() => {
     setDragDepth(0);
     setReplyTo(null);
+    setLightbox(null);
+    if (pending) {
+      for (const p of pending) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+    }
+    setPending(null);
+    setPendingCaption("");
+    setPendingIndex(0);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: chat change resets all interaction state
   }, [chat.jid]);
+
+  const clearPending = useCallback(() => {
+    setPending((prev) => {
+      if (prev) {
+        for (const p of prev) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      }
+      return null;
+    });
+    setPendingCaption("");
+    setPendingIndex(0);
+  }, []);
+
+  const queueFilesForPreview = useCallback(async (files: File[]) => {
+    const items: PendingMedia[] = [];
+    for (const file of files) {
+      if (file.size > 100 * 1024 * 1024) {
+        alert(`${file.name || "파일"}: 100MB 이하 파일만 전송 가능합니다.`);
+        continue;
+      }
+      try {
+        const buffer = await file.arrayBuffer();
+        const isPreviewable =
+          file.type.startsWith("image/") || file.type.startsWith("video/");
+        const previewUrl = isPreviewable ? URL.createObjectURL(file) : null;
+        const fallbackExt = (file.type.split("/")[1] || "bin").replace(
+          /[^a-z0-9]/gi,
+          "",
+        );
+        const name = file.name || `pasted-${Date.now()}.${fallbackExt}`;
+        items.push({
+          name,
+          mimeType: file.type || "application/octet-stream",
+          buffer,
+          previewUrl,
+        });
+      } catch (err) {
+        console.error("file read failed", err);
+      }
+    }
+    if (items.length === 0) return;
+    // Discard any previously-staged batch before replacing.
+    setPending((prev) => {
+      if (prev) {
+        for (const p of prev) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      }
+      return items;
+    });
+    setPendingIndex(0);
+    setPendingCaption("");
+  }, []);
+
+  const handleSendPending = useCallback(() => {
+    if (!pending || pending.length === 0) return;
+    const replyId = replyTo?.id;
+    const caption = pendingCaption.trim() || undefined;
+    pending.forEach((p, i) => {
+      onSendMedia(
+        p.name,
+        p.mimeType,
+        p.buffer,
+        i === 0 ? caption : undefined,
+        replyId,
+      );
+    });
+    clearPending();
+    setReplyTo(null);
+  }, [pending, pendingCaption, replyTo, onSendMedia, clearPending]);
 
   const subtitle = presenceText(presence) ?? (chat.isGroup ? "그룹 채팅" : formatJidShort(chat.jid));
 
   function handleSend(text: string) {
     onSend(text, replyTo?.id);
-    setReplyTo(null);
-  }
-
-  function handleSendMedia(
-    fileName: string,
-    mimeType: string,
-    data: ArrayBuffer,
-    caption?: string,
-  ) {
-    onSendMedia(fileName, mimeType, data, caption, replyTo?.id ?? undefined);
     setReplyTo(null);
   }
 
@@ -85,24 +156,15 @@ export function ChatWindow({
     e.preventDefault();
     setDragDepth(0);
     const files = Array.from(e.dataTransfer.files);
-    for (const file of files) {
-      if (file.size > 100 * 1024 * 1024) {
-        alert(`${file.name}: 100MB 이하 파일만 전송 가능합니다.`);
-        continue;
-      }
-      try {
-        const buffer = await file.arrayBuffer();
-        handleSendMedia(file.name, file.type || "application/octet-stream", buffer);
-      } catch (err) {
-        console.error("file read failed", err);
-      }
-    }
+    if (files.length > 0) await queueFilesForPreview(files);
   }
 
-  // Keep a ref to the latest handleSendMedia so the paste listener doesn't
-  // need to re-bind every time replyTo / onSendMedia change.
-  const handleSendMediaRef = useRef(handleSendMedia);
-  handleSendMediaRef.current = handleSendMedia;
+  // Keep refs so the paste listener can stay attached for the lifetime of the
+  // ChatWindow without re-binding every time the latest callback identity changes.
+  const queueRef = useRef(queueFilesForPreview);
+  queueRef.current = queueFilesForPreview;
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
 
   useEffect(() => {
     async function handlePaste(e: ClipboardEvent) {
@@ -110,8 +172,6 @@ export function ChatWindow({
       if (!cd) return;
       const target = e.target as HTMLElement | null;
       const targetTag = target?.tagName;
-      // If the user is pasting plain text into an input/textarea (e.g. the
-      // message composer), let the default behavior run.
       const hasText = !!cd.getData("text").length;
       const files: File[] = [];
       for (let i = 0; i < cd.items.length; i++) {
@@ -122,28 +182,14 @@ export function ChatWindow({
         }
       }
       if (files.length === 0) return;
-      // If both text and files are in the clipboard (e.g. a copied filename
-      // alongside the file) and the user is in a text field, prefer the text.
-      if (hasText && (targetTag === "INPUT" || targetTag === "TEXTAREA")) return;
-      e.preventDefault();
-      for (const file of files) {
-        if (file.size > 100 * 1024 * 1024) {
-          alert(`${file.name || "파일"}: 100MB 이하 파일만 전송 가능합니다.`);
-          continue;
-        }
-        try {
-          const buffer = await file.arrayBuffer();
-          const fallbackExt = (file.type.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "");
-          const fileName = file.name || `pasted-${Date.now()}.${fallbackExt}`;
-          handleSendMediaRef.current(
-            fileName,
-            file.type || "application/octet-stream",
-            buffer,
-          );
-        } catch (err) {
-          console.error("paste read failed", err);
-        }
+      // If the user is pasting plain text into a text input and there are no
+      // image files, defer to the native handler. When files are present we
+      // always take over and queue them for preview.
+      if (hasText && (targetTag === "INPUT" || targetTag === "TEXTAREA") && files.length === 0) {
+        return;
       }
+      e.preventDefault();
+      await queueRef.current(files);
     }
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
@@ -189,6 +235,7 @@ export function ChatWindow({
                 showSender={chat.isGroup}
                 isLatest={i === messages.length - 1}
                 onReply={() => setReplyTo(m)}
+                onOpenImage={(url, fileName) => setLightbox({ url, fileName })}
               />
             ))}
           </div>
@@ -198,12 +245,32 @@ export function ChatWindow({
       <MessageInput
         onSend={handleSend}
         onTyping={onTyping}
-        onSendMedia={handleSendMedia}
+        onFilesSelected={(files) => {
+          queueFilesForPreview(files);
+        }}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
       />
 
       {isDragging ? <DropOverlay /> : null}
+      {pending && pending.length > 0 ? (
+        <MediaPreview
+          items={pending}
+          currentIndex={pendingIndex}
+          caption={pendingCaption}
+          onIndexChange={setPendingIndex}
+          onCaptionChange={setPendingCaption}
+          onCancel={clearPending}
+          onSend={handleSendPending}
+        />
+      ) : null}
+      {lightbox ? (
+        <ImageLightbox
+          url={lightbox.url}
+          fileName={lightbox.fileName}
+          onClose={() => setLightbox(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -241,11 +308,13 @@ function MessageBubble({
   showSender,
   isLatest,
   onReply,
+  onOpenImage,
 }: {
   message: MessageItem;
   showSender: boolean;
   isLatest: boolean;
   onReply: () => void;
+  onOpenImage: (url: string, fileName?: string) => void;
 }) {
   const isOut = message.fromMe;
   return (
@@ -262,7 +331,7 @@ function MessageBubble({
           <div className="mb-0.5 text-[12px] font-semibold text-wa-green">{message.pushName}</div>
         ) : null}
         {message.quoted ? <QuotedPreview quoted={message.quoted} /> : null}
-        <MessageContent message={message} />
+        <MessageContent message={message} onOpenImage={onOpenImage} />
         <div className="-mb-0.5 mt-1 flex items-center justify-end gap-1 text-[10.5px] text-wa-text-muted">
           <span>
             {new Date(message.timestamp * 1000).toLocaleTimeString("ko-KR", {
@@ -342,14 +411,20 @@ function quotedText(q: QuotedInfo): string {
   }
 }
 
-function MessageContent({ message }: { message: MessageItem }) {
+function MessageContent({
+  message,
+  onOpenImage,
+}: {
+  message: MessageItem;
+  onOpenImage: (url: string, fileName?: string) => void;
+}) {
   if (message.type === "text" && message.text) {
     return (
       <div className="whitespace-pre-wrap break-words leading-relaxed">{message.text}</div>
     );
   }
   if (message.media?.url) {
-    return <MediaContent message={message} url={message.media.url} />;
+    return <MediaContent message={message} url={message.media.url} onOpenImage={onOpenImage} />;
   }
   if (isMediaType(message.type)) {
     return (
@@ -364,11 +439,24 @@ function MessageContent({ message }: { message: MessageItem }) {
   );
 }
 
-function MediaContent({ message, url }: { message: MessageItem; url: string }) {
+function MediaContent({
+  message,
+  url,
+  onOpenImage,
+}: {
+  message: MessageItem;
+  url: string;
+  onOpenImage: (url: string, fileName?: string) => void;
+}) {
   switch (message.type) {
     case "image":
       return (
-        <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+        <button
+          type="button"
+          onClick={() => onOpenImage(url, message.media?.fileName)}
+          className="block w-full cursor-zoom-in text-left"
+          aria-label="이미지 확대"
+        >
           <img
             src={url}
             alt=""
@@ -379,7 +467,7 @@ function MediaContent({ message, url }: { message: MessageItem; url: string }) {
               {message.text}
             </div>
           ) : null}
-        </a>
+        </button>
       );
     case "video":
       return (
