@@ -62,6 +62,18 @@ function unwrap(msg: WAMessageContent | null | undefined): WAMessageContent | nu
   if (msg.editedMessage?.message) return unwrap(msg.editedMessage.message);
   if (msg.documentWithCaptionMessage?.message)
     return unwrap(msg.documentWithCaptionMessage.message);
+  // Newer wrappers that may not be in the static Baileys types yet but show
+  // up on the wire — peel them off so the inner media still renders.
+  const wrappers: Array<keyof WAMessageContent> = [
+    "deviceSentMessage" as keyof WAMessageContent,
+    "messageHistoryBundle" as keyof WAMessageContent,
+  ];
+  for (const key of wrappers) {
+    const w = (msg as Record<string, unknown>)[key as string] as
+      | { message?: WAMessageContent }
+      | undefined;
+    if (w?.message) return unwrap(w.message);
+  }
   return msg;
 }
 
@@ -103,15 +115,12 @@ function previewFromContent(
   const poll = msg.pollCreationMessage ?? msg.pollCreationMessageV2 ?? msg.pollCreationMessageV3;
   if (poll) return { text: poll.name ?? "투표", type: "poll", skip: false };
 
-  // No user-visible content — must be pure protocol metadata or key distribution.
-  if (msg.protocolMessage || msg.senderKeyDistributionMessage) {
-    return { text: "", type: "system", skip: true };
-  }
-  const keys = Object.keys(msg).filter((k) => msg[k as keyof WAMessageContent] != null);
-  if (keys.length === 1 && keys[0] === "messageContextInfo") {
-    return { text: "", type: "system", skip: true };
-  }
-  return { text: "", type: "other", skip: false };
+  // No user-visible content matched — must be protocol / album linker /
+  // unknown wrapper / messageContextInfo-only / etc. Skip silently rather
+  // than render an empty "(빈 메시지)" bubble. The cost is that genuinely
+  // new WhatsApp message types we haven't added support for would also be
+  // hidden, which is the right trade for cleanliness here.
+  return { text: "", type: "system", skip: true };
 }
 
 function extractContextInfo(content: WAMessageContent | null | undefined) {
