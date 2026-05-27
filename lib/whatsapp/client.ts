@@ -101,8 +101,14 @@ function previewFromContent(
     return { text: msg.videoMessage.caption ?? "", type: "video", skip: false };
   if (msg.audioMessage)
     return { text: "", type: msg.audioMessage.ptt ? "voice" : "audio", skip: false };
-  if (msg.documentMessage)
-    return { text: msg.documentMessage.fileName ?? "문서", type: "document", skip: false };
+  if (msg.documentMessage) {
+    // Document messages can carry a caption alongside the file. Surface the
+    // caption as the bubble's text so it renders below the file badge; the
+    // file name is kept separately on media.fileName.
+    const caption = msg.documentMessage.caption ?? "";
+    const fileName = msg.documentMessage.fileName ?? "";
+    return { text: caption || fileName || "문서", type: "document", skip: false };
+  }
   if (msg.stickerMessage) return { text: "", type: "sticker", skip: false };
   if (msg.contactMessage)
     return { text: msg.contactMessage.displayName ?? "연락처", type: "contact", skip: false };
@@ -289,8 +295,11 @@ export async function initWhatsApp(io: IO) {
   function applyContact(id: string | null | undefined, name: string | null | undefined) {
     if (!id || !name) return;
     contactNames.set(id, name);
+    // Always reflect the latest name onto the chat — the previous fallback-only
+    // condition missed chats that had inherited a foreign JID (e.g. an @lid
+    // number) as their name when an LID chat was merged into a phone chat.
     const chat = chats.get(id);
-    if (chat && chat.name === formatJid(id)) {
+    if (chat && chat.name !== name) {
       const updated: ChatInfo = { ...chat, name };
       chats.set(id, updated);
       io.emit("chat-update", updated);
@@ -362,9 +371,13 @@ export async function initWhatsApp(io: IO) {
     if (!lidChat) return;
     const existing = chats.get(phone);
     const lidNewer = (lidChat.lastMessageTime ?? 0) > (existing?.lastMessageTime ?? 0);
+    // Re-resolve the display name from the canonical phone JID — copying the
+    // LID-keyed chat's fallback "name" verbatim used to leak the @lid number
+    // into the sidebar even after the chats had been unified.
+    const resolvedName = getDisplayName(phone);
     const merged: ChatInfo = {
       jid: phone,
-      name: existing?.name ?? lidChat.name,
+      name: resolvedName,
       isGroup: lidChat.isGroup,
       lastMessage: lidNewer ? lidChat.lastMessage : existing?.lastMessage,
       lastMessageTime: Math.max(

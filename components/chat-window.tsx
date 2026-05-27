@@ -500,15 +500,27 @@ function MediaContent({
       return <img src={url} alt="sticker" className="h-32 w-32 object-contain" />;
     case "document": {
       const name = message.media?.fileName ?? "document";
+      // Show caption below the file badge when the sender attached one.
+      // Filter out the case where text equals the filename (our fallback when
+      // no real caption is present) so we don't print it twice.
+      const caption =
+        message.text && message.text !== name ? message.text : null;
       return (
-        <a
-          href={url}
-          download={name}
-          className="flex items-center gap-2.5 rounded-md bg-wa-panel/60 px-3 py-2.5 text-wa-text transition-colors hover:bg-wa-panel"
-        >
-          <span className="text-xl">📄</span>
-          <span className="truncate text-[13px]">{name}</span>
-        </a>
+        <>
+          <a
+            href={url}
+            download={name}
+            className="flex items-center gap-2.5 rounded-md bg-wa-panel/60 px-3 py-2.5 text-wa-text transition-colors hover:bg-wa-panel"
+          >
+            <span className="text-xl">📄</span>
+            <span className="truncate text-[13px]">{name}</span>
+          </a>
+          {caption ? (
+            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
+              {caption}
+            </div>
+          ) : null}
+        </>
       );
     }
     default:
