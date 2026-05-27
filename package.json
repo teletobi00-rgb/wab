@@ -18,7 +18,7 @@
     "publish": "npm run fix:wincodesign && npm run icons && npm run build && npm run compile:electron && electron-builder --publish always"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.18",
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
     "electron-updater": "^6.3.9",
     "next": "^15.1.0",
     "pino": "^9.5.0",
@@ -81,7 +81,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "executableName": "WAB",

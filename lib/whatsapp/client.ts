@@ -199,7 +199,26 @@ export async function initWhatsApp(io: IO) {
   const contactNames = new Map<string, string>();
   const groupSubjects = new Map<string, string>();
   const mediaCache = new Map<string, MediaCacheEntry>();
+  // Maps @lid JIDs to their canonical @s.whatsapp.net counterpart so all
+  // messages for a contact end up under the same chat regardless of which
+  // JID form WhatsApp uses on a given event.
+  const lidToPhone = new Map<string, string>();
   let restarting = false;
+
+  function recordLid(contact: { id?: string | null; lid?: string | null } | undefined | null) {
+    if (!contact?.id || !contact.lid) return;
+    if (contact.id.endsWith("@s.whatsapp.net") && contact.lid.endsWith("@lid")) {
+      lidToPhone.set(contact.lid, contact.id);
+    }
+  }
+
+  function canonicalJid(jid: string | null | undefined): string {
+    if (!jid) return jid ?? "";
+    if (jid.endsWith("@lid")) {
+      return lidToPhone.get(jid) ?? jid;
+    }
+    return jid;
+  }
 
   await fs.mkdir(AUTH_DIR, { recursive: true });
   await fs.mkdir(MEDIA_DIR, { recursive: true });
@@ -337,6 +356,23 @@ export async function initWhatsApp(io: IO) {
     const tsRaw = m.messageTimestamp;
     const timestamp =
       typeof tsRaw === "number" ? tsRaw : tsRaw ? Number(tsRaw) : Math.floor(Date.now() / 1000);
+    // Baileys 7.x exposes the phone-number JID alongside the @lid form via
+    // remoteJidAlt / participantAlt. Learn the mapping from the message keys
+    // so every chat lands under the phone-number JID regardless of which form
+    // a particular event uses.
+    const key = m.key as typeof m.key & {
+      remoteJidAlt?: string | null;
+      participantAlt?: string | null;
+    };
+    if (
+      key.remoteJid?.endsWith("@lid") &&
+      key.remoteJidAlt?.endsWith("@s.whatsapp.net")
+    ) {
+      lidToPhone.set(key.remoteJid, key.remoteJidAlt);
+    }
+    if (key.participant?.endsWith("@lid") && key.participantAlt?.endsWith("@s.whatsapp.net")) {
+      lidToPhone.set(key.participant, key.participantAlt);
+    }
     const item: MessageItem = {
       id: m.key.id,
       jid: m.key.remoteJid,
@@ -390,6 +426,12 @@ export async function initWhatsApp(io: IO) {
   function upsertMessage(m: WAMessage, broadcast: boolean) {
     const { item, skip } = toMessageItem(m);
     if (!item || skip) return;
+    // Merge LID JIDs into their phone-number JID counterparts so we don't
+    // create duplicate chats when WhatsApp uses both forms for the same person.
+    item.jid = canonicalJid(item.jid);
+    if (item.participantJid) {
+      item.participantJid = canonicalJid(item.participantJid);
+    }
 
     if (m.key.id) rawMessages.set(m.key.id, m);
 
@@ -475,8 +517,9 @@ export async function initWhatsApp(io: IO) {
         auth: state,
         logger,
         browser: Browsers.macOS("Desktop"),
+        // History sync disabled — only live messages from connection time onwards.
         syncFullHistory: false,
-        shouldSyncHistoryMessage: () => true,
+        shouldSyncHistoryMessage: () => false,
         markOnlineOnConnect: false,
       });
 
@@ -505,7 +548,24 @@ export async function initWhatsApp(io: IO) {
           io.emit("status", status);
           sock = null;
           restarting = false;
-          if (!isLoggedOut) {
+          if (isLoggedOut) {
+            console.log("Device logged out (code 401) - wiping auth and restarting for fresh QR");
+            chats.clear();
+            messages.clear();
+            rawMessages.clear();
+            contactNames.clear();
+            groupSubjects.clear();
+            lidToPhone.clear();
+            try {
+              await fs.rm(AUTH_DIR, { recursive: true, force: true });
+              await fs.mkdir(AUTH_DIR, { recursive: true });
+            } catch (err) {
+              console.error("auth wipe failed", err);
+            }
+            setTimeout(() => {
+              start().catch((e) => console.error("restart after logout failed", e));
+            }, 1000);
+          } else {
             setTimeout(() => {
               start().catch((e) => console.error("restart failed", e));
             }, 2000);
@@ -524,39 +584,26 @@ export async function initWhatsApp(io: IO) {
         }
       });
 
-      sock.ev.on("messaging-history.set", ({ chats: hChats, contacts, messages: hMsgs }) => {
+      // History sync is intentionally disabled (see makeWASocket options above).
+      // We still listen here only to capture contact metadata (LID mapping, names)
+      // — chat list and old messages are dropped so the UI starts empty.
+      sock.ev.on("messaging-history.set", ({ contacts }) => {
         for (const c of contacts) {
+          recordLid(c as { id?: string | null; lid?: string | null });
           applyContact(c.id, c.name ?? c.notify ?? c.verifiedName ?? null);
         }
-        for (const c of hChats) {
-          if (!c.id) continue;
-          if (c.id.endsWith("@g.us") && c.name) applyGroupName(c.id, c.name);
-          upsertChat({
-            jid: c.id,
-            name: c.name ?? contactNames.get(c.id) ?? undefined,
-            lastMessageTime: c.conversationTimestamp ? Number(c.conversationTimestamp) : undefined,
-            unreadCount: c.unreadCount ?? 0,
-          });
-        }
-        for (const m of hMsgs) {
-          upsertMessage(m, false);
-        }
-        for (const c of hChats) {
-          if (c.id?.endsWith("@g.us") && !groupSubjects.has(c.id)) {
-            ensureGroupName(c.id).catch(() => {});
-          }
-        }
-        io.emit("chats", Array.from(chats.values()));
       });
 
       sock.ev.on("contacts.upsert", (contacts) => {
         for (const c of contacts) {
+          recordLid(c as { id?: string | null; lid?: string | null });
           applyContact(c.id, c.name ?? c.notify ?? c.verifiedName ?? null);
         }
       });
 
       sock.ev.on("contacts.update", (updates) => {
         for (const c of updates) {
+          recordLid(c as { id?: string | null; lid?: string | null });
           applyContact(c.id, c.name ?? c.notify ?? c.verifiedName ?? null);
         }
       });
@@ -741,6 +788,7 @@ export async function initWhatsApp(io: IO) {
       contactNames.clear();
       groupSubjects.clear();
       mediaCache.clear();
+      lidToPhone.clear();
       await fs.rm(AUTH_DIR, { recursive: true, force: true });
       await fs.rm(MEDIA_DIR, { recursive: true, force: true });
       await fs.mkdir(AUTH_DIR, { recursive: true });
