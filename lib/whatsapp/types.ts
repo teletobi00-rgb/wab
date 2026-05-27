@@ -78,3 +78,14 @@ export type MessageStatusUpdate = {
   jid: string;
   status: MessageStatus;
 };
+
+export type ContactItem = {
+  jid: string;
+  name: string;
+  isGroup: boolean;
+};
+
+export type CheckNumberResult = {
+  exists: boolean;
+  jid?: string;
+};

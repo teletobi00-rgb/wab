@@ -835,6 +835,42 @@ export async function initWhatsApp(io: IO) {
     getStatus: () => status,
     getQr: () => currentQr,
     getChats: () => Array.from(chats.values()),
+    getContacts: () => {
+      const items: { jid: string; name: string; isGroup: boolean }[] = [];
+      for (const [jid, name] of contactNames.entries()) {
+        if (!jid.endsWith("@s.whatsapp.net")) continue;
+        items.push({ jid, name, isGroup: false });
+      }
+      for (const [jid, subject] of groupSubjects.entries()) {
+        items.push({ jid, name: subject, isGroup: true });
+      }
+      return items.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    },
+    checkOnWhatsApp: async (
+      phone: string,
+    ): Promise<{ exists: boolean; jid?: string }> => {
+      if (!sock || status.state !== "connected") return { exists: false };
+      const cleaned = phone.replace(/\D/g, "");
+      if (!cleaned) return { exists: false };
+      try {
+        const results = await sock.onWhatsApp(cleaned);
+        if (results && results.length > 0 && results[0].exists) {
+          return { exists: true, jid: results[0].jid };
+        }
+        return { exists: false };
+      } catch (err) {
+        console.error("checkOnWhatsApp failed", err);
+        return { exists: false };
+      }
+    },
+    ensureChat: (rawJid: string) => {
+      const jid = canonicalJid(rawJid);
+      const existing = chats.get(jid);
+      if (existing) return existing;
+      const created = upsertChat({ jid, unreadCount: 0 });
+      io.emit("chat-update", created);
+      return created;
+    },
     loadMessages: (jid: string, limit = 50) => {
       const list = messages.get(jid) ?? [];
       return list.slice(-limit);

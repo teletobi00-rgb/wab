@@ -99,6 +99,56 @@ export function ChatWindow({
     }
   }
 
+  // Keep a ref to the latest handleSendMedia so the paste listener doesn't
+  // need to re-bind every time replyTo / onSendMedia change.
+  const handleSendMediaRef = useRef(handleSendMedia);
+  handleSendMediaRef.current = handleSendMedia;
+
+  useEffect(() => {
+    async function handlePaste(e: ClipboardEvent) {
+      const cd = e.clipboardData;
+      if (!cd) return;
+      const target = e.target as HTMLElement | null;
+      const targetTag = target?.tagName;
+      // If the user is pasting plain text into an input/textarea (e.g. the
+      // message composer), let the default behavior run.
+      const hasText = !!cd.getData("text").length;
+      const files: File[] = [];
+      for (let i = 0; i < cd.items.length; i++) {
+        const item = cd.items[i];
+        if (item && item.kind === "file") {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length === 0) return;
+      // If both text and files are in the clipboard (e.g. a copied filename
+      // alongside the file) and the user is in a text field, prefer the text.
+      if (hasText && (targetTag === "INPUT" || targetTag === "TEXTAREA")) return;
+      e.preventDefault();
+      for (const file of files) {
+        if (file.size > 100 * 1024 * 1024) {
+          alert(`${file.name || "파일"}: 100MB 이하 파일만 전송 가능합니다.`);
+          continue;
+        }
+        try {
+          const buffer = await file.arrayBuffer();
+          const fallbackExt = (file.type.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "");
+          const fileName = file.name || `pasted-${Date.now()}.${fallbackExt}`;
+          handleSendMediaRef.current(
+            fileName,
+            file.type || "application/octet-stream",
+            buffer,
+          );
+        } catch (err) {
+          console.error("paste read failed", err);
+        }
+      }
+    }
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, []);
+
   return (
     <div
       className="relative flex h-full flex-col"

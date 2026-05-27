@@ -117,6 +117,30 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
       }
     });
 
+    socket.on("list-contacts", (ack) => {
+      ack(wa?.getContacts() ?? []);
+    });
+
+    socket.on("check-number", async ({ phone }, ack) => {
+      try {
+        const result = await wa?.checkOnWhatsApp(phone);
+        ack(result ?? { exists: false });
+      } catch (err) {
+        console.error("check-number failed", err);
+        ack({ exists: false });
+      }
+    });
+
+    socket.on("start-chat", ({ jid }, ack) => {
+      try {
+        const chat = wa?.ensureChat(jid);
+        ack(chat ?? null);
+      } catch (err) {
+        console.error("start-chat failed", err);
+        ack(null);
+      }
+    });
+
     socket.on("logout", async () => {
       try {
         await wa?.logout();

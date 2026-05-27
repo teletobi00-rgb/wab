@@ -14,6 +14,7 @@ import type {
 import { Avatar } from "./avatar";
 import { ChatList } from "./chat-list";
 import { ChatWindow } from "./chat-window";
+import { NewChatModal } from "./new-chat-modal";
 import { QrLogin } from "./qr-login";
 import { SearchBar } from "./search-bar";
 
@@ -26,6 +27,7 @@ export function ChatApp() {
   const [messagesByJid, setMessagesByJid] = useState<Record<string, MessageItem[]>>({});
   const [presenceByJid, setPresenceByJid] = useState<Record<string, PresenceState>>({});
   const [query, setQuery] = useState("");
+  const [newChatOpen, setNewChatOpen] = useState(false);
   const notif = useNotifications();
   const selectedJidRef = useRef<string | null>(null);
   const chatsRef = useRef<ChatInfo[]>([]);
@@ -167,6 +169,7 @@ export function ChatApp() {
           me={status.me?.name ?? "Me"}
           notifEnabled={notif.enabled}
           onToggleNotif={notif.toggle}
+          onNewChat={() => setNewChatOpen(true)}
           onLogout={() => {
             if (confirm("정말 로그아웃 하시겠습니까? 세션이 삭제됩니다.")) {
               socket?.emit("logout");
@@ -221,6 +224,24 @@ export function ChatApp() {
           <EmptyState />
         )}
       </main>
+      {newChatOpen ? (
+        <NewChatModal
+          socket={socket}
+          onClose={() => setNewChatOpen(false)}
+          onStartChat={(jid) => {
+            if (!socket) return;
+            socket.emit("start-chat", { jid }, (chat) => {
+              if (chat) {
+                setChats((prev) => {
+                  if (prev.find((c) => c.jid === chat.jid)) return prev;
+                  return sortChats([chat, ...prev]);
+                });
+                setSelectedJid(chat.jid);
+              }
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -280,11 +301,13 @@ function Header({
   me,
   notifEnabled,
   onToggleNotif,
+  onNewChat,
   onLogout,
 }: {
   me: string;
   notifEnabled: boolean;
   onToggleNotif: () => void;
+  onNewChat: () => void;
   onLogout: () => void;
 }) {
   return (
@@ -300,6 +323,28 @@ function Header({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          onClick={onNewChat}
+          title="새 채팅"
+          aria-label="새 채팅"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M16 4h2a3 3 0 0 1 3 3v13a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h2"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+            <path
+              d="M12 3v10m-5-5h10"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={onToggleNotif}
