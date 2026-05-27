@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { app, BrowserWindow, dialog, Menu, nativeImage, shell, Tray } from "electron";
@@ -11,6 +12,8 @@ app.setAppUserModelId("com.wab.app");
 const userDataPath = app.getPath("userData");
 process.env.WAB_AUTH_DIR = path.join(userDataPath, "auth");
 process.env.WAB_MEDIA_DIR = path.join(userDataPath, "media");
+process.env.WAB_LOG_FILE = path.join(userDataPath, "wab.log");
+if (!process.env.WAB_LOG_LEVEL) process.env.WAB_LOG_LEVEL = "warn";
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -164,6 +167,13 @@ async function createMainWindow(url: string) {
 
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
+  // dist:dir builds (and any unpacked variant) don't include the update
+  // manifest; electron-updater would spam ENOENT on every check. Skip cleanly.
+  const manifestPath = path.join(process.resourcesPath, "app-update.yml");
+  if (!existsSync(manifestPath)) {
+    console.log("auto-updater: no app-update.yml in resources, update check disabled");
+    return;
+  }
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;

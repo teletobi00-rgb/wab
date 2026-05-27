@@ -21,7 +21,20 @@ import type {
   WASocket,
 } from "@whiskeysockets/baileys";
 
-const logger = pino({ level: "warn" });
+function buildLogger() {
+  const level = process.env.WAB_LOG_LEVEL ?? "warn";
+  const logFile = process.env.WAB_LOG_FILE;
+  if (!logFile) return pino({ level });
+  try {
+    const fsSync = require("node:fs") as typeof import("node:fs");
+    fsSync.mkdirSync(path.dirname(logFile), { recursive: true });
+    return pino({ level }, pino.destination({ dest: logFile, sync: false, mkdir: true }));
+  } catch (err) {
+    console.error("log file setup failed, falling back to stdout", err);
+    return pino({ level });
+  }
+}
+const logger = buildLogger();
 
 function resolveAuthDir(): string {
   return process.env.WAB_AUTH_DIR ?? path.join(process.cwd(), "auth_info_baileys");
@@ -425,7 +438,19 @@ export async function initWhatsApp(io: IO) {
 
   function upsertMessage(m: WAMessage, broadcast: boolean) {
     const { item, skip } = toMessageItem(m);
-    if (!item || skip) return;
+    if (!item || skip) {
+      if (broadcast) {
+        const msg = unwrap(m.message);
+        const fields = msg
+          ? Object.keys(msg).filter((k) => msg[k as keyof WAMessageContent] != null)
+          : [];
+        logger.warn(
+          { id: m.key.id, jid: m.key.remoteJid, fromMe: m.key.fromMe, fields },
+          "upsertMessage skipped",
+        );
+      }
+      return;
+    }
     // Merge LID JIDs into their phone-number JID counterparts so we don't
     // create duplicate chats when WhatsApp uses both forms for the same person.
     item.jid = canonicalJid(item.jid);
@@ -521,6 +546,11 @@ export async function initWhatsApp(io: IO) {
         syncFullHistory: false,
         shouldSyncHistoryMessage: () => false,
         markOnlineOnConnect: false,
+        // Allow Baileys more chances to recover failed message decryption via
+        // retry receipts before giving up (default is fairly low and we see
+        // intermittent drops on the new LID identifier format).
+        maxMsgRetryCount: 15,
+        retryRequestDelayMs: 500,
         // When a recipient fails to decrypt a message we sent, WhatsApp asks us
         // to resend via a retry receipt. Baileys calls this callback to fetch
         // the original content from our local cache.
