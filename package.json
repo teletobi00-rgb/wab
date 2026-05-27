@@ -1,0 +1,105 @@
+{
+  "name": "wab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WAB",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "next build",
+    "start": "NODE_ENV=production tsx server.ts",
+    "check": "biome check --write .",
+    "icons": "node scripts/make-icons.mjs",
+    "compile:electron": "tsc --project electron/tsconfig.json",
+    "electron:dev": "concurrently -k -n next,electron -c blue,green \"npm run dev\" \"wait-on http-get://localhost:3000 && npm run compile:electron && cross-env WAB_DEV_URL=http://localhost:3000 electron .\"",
+    "dist": "npm run icons && npm run build && npm run compile:electron && electron-builder",
+    "dist:dir": "npm run icons && npm run build && npm run compile:electron && electron-builder --dir",
+    "publish": "npm run icons && npm run build && npm run compile:electron && electron-builder --publish always"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "electron-updater": "^6.3.9",
+    "next": "^15.1.0",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.1",
+    "postcss": "^8.4.49",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.wab.app",
+    "productName": "WAB",
+    "copyright": "WAB",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      ".next/**/*",
+      "!.next/cache/**/*",
+      "public/**/*",
+      "package.json",
+      "next.config.*"
+    ],
+    "extraResources": [
+      {
+        "from": "build/tray.png",
+        "to": "tray.png"
+      },
+      {
+        "from": "build/tray@2x.png",
+        "to": "tray@2x.png"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/@whiskeysockets/baileys/**/*"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "executableName": "WAB",
+      "artifactName": "WAB-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WAB"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "teletobi00-rgb",
+        "repo": "wab"
+      }
+    ]
+  }
+}

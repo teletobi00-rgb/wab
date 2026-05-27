@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "outDir": "../dist",
+    "rootDir": "..",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": false,
+    "noEmit": false,
+    "isolatedModules": false
+  },
+  "include": [
+    "./**/*.ts",
+    "../server.ts",
+    "../lib/server.ts",
+    "../lib/socket/events.ts",
+    "../lib/whatsapp/client.ts",
+    "../lib/whatsapp/types.ts"
+  ],
+  "exclude": [
+    "../node_modules",
+    "../components",
+    "../app",
+    "../lib/notifications.ts",
+    "../lib/socket/client.ts",
+    "../dist",
+    "../release"
+  ]
+}

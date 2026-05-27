@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/PretendardVariable.woff2") format("woff2-variations");
+}
+
+@theme {
+  --font-sans:
+    "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto,
+    "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic",
+    sans-serif;
+
+  --color-wa-green: #00a884;
+  --color-wa-green-soft: #1da57a;
+  --color-wa-teal: #008069;
+  --color-wa-bg: #0b141a;
+  --color-wa-bg-chat: #0a1014;
+  --color-wa-panel: #111b21;
+  --color-wa-panel-soft: #202c33;
+  --color-wa-panel-hover: #2a3942;
+  --color-wa-border: rgba(134, 150, 160, 0.15);
+  --color-wa-text: #e9edef;
+  --color-wa-text-muted: #8696a0;
+  --color-wa-bubble-out: #005c4b;
+  --color-wa-bubble-in: #202c33;
+  --color-wa-link: #53bdeb;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-wa-bg);
+  color: var(--color-wa-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "ss02";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+input,
+textarea {
+  font-size: 14px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(134, 150, 160, 0.25) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(134, 150, 160, 0.25);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(134, 150, 160, 0.5);
+  background-clip: content-box;
+}
+
+.chat-bg {
+  background-color: var(--color-wa-bg-chat);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.bubble-in {
+  animation: bubble-in 140ms ease-out;
+}

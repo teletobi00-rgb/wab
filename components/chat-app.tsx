@@ -1,0 +1,325 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useNotifications } from "@/lib/notifications";
+import { useSocket } from "@/lib/socket/client";
+import type {
+  ChatInfo,
+  MessageItem,
+  MessageStatusUpdate,
+  PresenceState,
+  PresenceUpdate,
+  Status,
+} from "@/lib/whatsapp/types";
+import { Avatar } from "./avatar";
+import { ChatList } from "./chat-list";
+import { ChatWindow } from "./chat-window";
+import { QrLogin } from "./qr-login";
+import { SearchBar } from "./search-bar";
+
+export function ChatApp() {
+  const { socket, connected: socketConnected } = useSocket();
+  const [status, setStatus] = useState<Status>({ state: "disconnected" });
+  const [qr, setQr] = useState<string | null>(null);
+  const [chats, setChats] = useState<ChatInfo[]>([]);
+  const [selectedJid, setSelectedJid] = useState<string | null>(null);
+  const [messagesByJid, setMessagesByJid] = useState<Record<string, MessageItem[]>>({});
+  const [presenceByJid, setPresenceByJid] = useState<Record<string, PresenceState>>({});
+  const [query, setQuery] = useState("");
+  const notif = useNotifications();
+  const selectedJidRef = useRef<string | null>(null);
+  const chatsRef = useRef<ChatInfo[]>([]);
+
+  useEffect(() => {
+    selectedJidRef.current = selectedJid;
+  }, [selectedJid]);
+
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const onStatus = (s: Status) => {
+      setStatus(s);
+      if (s.state === "connected") setQr(null);
+      if (s.state === "disconnected") {
+        setChats([]);
+        setMessagesByJid({});
+        setPresenceByJid({});
+        setSelectedJid(null);
+      }
+    };
+    const onQr = ({ qr }: { qr: string }) => setQr(qr);
+    const onChats = (cs: ChatInfo[]) => setChats(sortChats(cs));
+    const onChatUpdate = (c: ChatInfo) => {
+      setChats((prev) => {
+        const i = prev.findIndex((x) => x.jid === c.jid);
+        const next = i >= 0 ? [...prev.slice(0, i), c, ...prev.slice(i + 1)] : [c, ...prev];
+        return sortChats(next);
+      });
+    };
+    const onMessageUpsert = ({ jid, message }: { jid: string; message: MessageItem }) => {
+      setMessagesByJid((prev) => {
+        const list = prev[jid] ?? [];
+        const idx = list.findIndex((m) => m.id === message.id);
+        if (idx >= 0) {
+          const next = list.slice();
+          next[idx] = { ...next[idx], ...message };
+          return { ...prev, [jid]: next };
+        }
+        return {
+          ...prev,
+          [jid]: [...list, message].sort((a, b) => a.timestamp - b.timestamp),
+        };
+      });
+
+      // Notification: only for incoming, when chat not focused
+      if (message.fromMe) return;
+      const isCurrent = selectedJidRef.current === jid;
+      const isVisible =
+        typeof document !== "undefined" && document.visibilityState === "visible";
+      const hasFocus = typeof document !== "undefined" && document.hasFocus();
+      if (isCurrent && isVisible && hasFocus) return;
+
+      const chat = chatsRef.current.find((c) => c.jid === jid);
+      const title = chat?.name ?? message.pushName ?? "새 메시지";
+      const sender = chat?.isGroup && message.pushName ? `${message.pushName}: ` : "";
+      const body = sender + (message.text || messagePreview(message));
+      notif.notify(title, body, () => setSelectedJid(jid));
+    };
+    const onMessageStatus = ({ id, jid, status }: MessageStatusUpdate) => {
+      setMessagesByJid((prev) => {
+        const list = prev[jid];
+        if (!list) return prev;
+        const idx = list.findIndex((m) => m.id === id);
+        if (idx < 0) return prev;
+        const next = list.slice();
+        next[idx] = { ...next[idx], status };
+        return { ...prev, [jid]: next };
+      });
+    };
+    const onPresence = ({ jid, state }: PresenceUpdate) => {
+      setPresenceByJid((prev) => ({ ...prev, [jid]: state }));
+    };
+
+    socket.on("status", onStatus);
+    socket.on("qr", onQr);
+    socket.on("chats", onChats);
+    socket.on("chat-update", onChatUpdate);
+    socket.on("message-upsert", onMessageUpsert);
+    socket.on("message-status", onMessageStatus);
+    socket.on("presence", onPresence);
+
+    return () => {
+      socket.off("status", onStatus);
+      socket.off("qr", onQr);
+      socket.off("chats", onChats);
+      socket.off("chat-update", onChatUpdate);
+      socket.off("message-upsert", onMessageUpsert);
+      socket.off("message-status", onMessageStatus);
+      socket.off("presence", onPresence);
+    };
+  }, [socket, notif.notify]);
+
+  useEffect(() => {
+    if (!socket || !selectedJid) return;
+    socket.emit("load-messages", { jid: selectedJid, limit: 100 }, (msgs) => {
+      setMessagesByJid((prev) => ({ ...prev, [selectedJid]: msgs }));
+    });
+    socket.emit("subscribe-presence", { jid: selectedJid });
+    socket.emit("mark-read", { jid: selectedJid });
+  }, [socket, selectedJid]);
+
+  if (!socketConnected) return <Centered>서버 연결 중...</Centered>;
+  if (status.state !== "connected") return <QrLogin qr={qr} status={status} />;
+
+  const selectedChat = chats.find((c) => c.jid === selectedJid) ?? null;
+  const selectedMessages = selectedJid ? (messagesByJid[selectedJid] ?? []) : [];
+  const selectedPresence = selectedJid ? presenceByJid[selectedJid] : undefined;
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden">
+      <aside className="flex w-[360px] flex-col border-r border-wa-border bg-wa-panel">
+        <Header
+          me={status.me?.name ?? "Me"}
+          notifEnabled={notif.enabled}
+          onToggleNotif={notif.toggle}
+          onLogout={() => {
+            if (confirm("정말 로그아웃 하시겠습니까? 세션이 삭제됩니다.")) {
+              socket?.emit("logout");
+            }
+          }}
+        />
+        <SearchBar value={query} onChange={setQuery} />
+        <ChatList chats={chats} selectedJid={selectedJid} onSelect={setSelectedJid} query={query} />
+      </aside>
+      <main className="flex flex-1 flex-col bg-wa-bg">
+        {selectedChat ? (
+          <ChatWindow
+            key={selectedChat.jid}
+            chat={selectedChat}
+            messages={selectedMessages}
+            presence={selectedPresence}
+            onSend={(text, replyToId) =>
+              socket?.emit("send-message", { jid: selectedChat.jid, text, replyToId })
+            }
+            onTyping={(isTyping) =>
+              socket?.emit("typing", { jid: selectedChat.jid, isTyping })
+            }
+            onSendMedia={(fileName, mimeType, data, caption, replyToId) =>
+              socket?.emit("send-media", {
+                jid: selectedChat.jid,
+                fileName,
+                mimeType,
+                data,
+                caption,
+                replyToId,
+              })
+            }
+          />
+        ) : (
+          <EmptyState />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function messagePreview(m: MessageItem): string {
+  switch (m.type) {
+    case "image":
+      return "📷 사진";
+    case "video":
+      return "🎥 영상";
+    case "audio":
+      return "🎵 오디오";
+    case "voice":
+      return "🎤 음성 메시지";
+    case "document":
+      return "📄 문서";
+    case "sticker":
+      return "스티커";
+    case "contact":
+      return "👤 연락처";
+    case "location":
+      return "📍 위치";
+    case "poll":
+      return "📊 투표";
+    default:
+      return "새 메시지";
+  }
+}
+
+function sortChats(cs: ChatInfo[]): ChatInfo[] {
+  return cs.slice().sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0));
+}
+
+function EmptyState() {
+  return (
+    <div className="chat-bg flex h-full w-full flex-col items-center justify-center text-center">
+      <div className="mb-4 text-6xl opacity-30">💬</div>
+      <h2 className="text-lg font-medium text-wa-text">WAB</h2>
+      <p className="mt-1 max-w-sm text-sm text-wa-text-muted">
+        좌측 목록에서 대화를 선택하면 메시지가 표시됩니다.
+        <br />
+        파일은 드래그&드롭하거나 📎 버튼으로 전송하세요.
+      </p>
+    </div>
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen w-screen items-center justify-center bg-wa-bg text-wa-text-muted">
+      {children}
+    </div>
+  );
+}
+
+function Header({
+  me,
+  notifEnabled,
+  onToggleNotif,
+  onLogout,
+}: {
+  me: string;
+  notifEnabled: boolean;
+  onToggleNotif: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-wa-border bg-wa-panel-soft px-4 py-2.5">
+      <div className="flex min-w-0 items-center gap-3">
+        <Avatar name={me} isGroup={false} size="sm" />
+        <div className="min-w-0">
+          <div className="truncate text-[14px] font-medium text-wa-text">{me}</div>
+          <div className="flex items-center gap-1 text-[11px] text-wa-text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-wa-green" />
+            온라인
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          onClick={onToggleNotif}
+          title={notifEnabled ? "알림 켜짐" : "알림 꺼짐"}
+          aria-label={notifEnabled ? "알림 끄기" : "알림 켜기"}
+          className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-wa-panel-hover ${
+            notifEnabled ? "text-wa-green" : "text-wa-text-muted"
+          }`}
+        >
+          {notifEnabled ? <BellFilled /> : <BellOutline />}
+        </button>
+        <button
+          type="button"
+          onClick={onLogout}
+          className="rounded px-2 py-1 text-[11px] text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
+        >
+          로그아웃
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BellOutline() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 7H4c.5-1.5 2-3 2-7Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 19a2 2 0 0 0 4 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function BellFilled() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 7H4c.5-1.5 2-3 2-7Z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M10 19a2 2 0 0 0 4 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
