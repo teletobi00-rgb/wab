@@ -71,15 +71,15 @@ function previewFromContent(
   const msg = unwrap(content);
   if (!msg) return { text: "", type: "system", skip: true };
 
-  if (msg.protocolMessage || msg.senderKeyDistributionMessage) {
+  // Reactions / poll updates are decorations on other messages, not standalone.
+  if (msg.reactionMessage || msg.pollUpdateMessage) {
     return { text: "", type: "system", skip: true };
   }
 
-  const keys = Object.keys(msg).filter((k) => msg[k as keyof WAMessageContent] != null);
-  if (keys.length === 1 && keys[0] === "messageContextInfo") {
-    return { text: "", type: "system", skip: true };
-  }
-
+  // IMPORTANT: check actual content BEFORE skipping for protocol/keydist envelopes.
+  // Group messages routinely arrive with senderKeyDistributionMessage attached
+  // alongside real content (extendedTextMessage, imageMessage, …) — skipping on
+  // sight there silently drops every "first-message-after-key-rotation" in a group.
   if (msg.conversation) return { text: msg.conversation, type: "text", skip: false };
   if (msg.extendedTextMessage?.text)
     return { text: msg.extendedTextMessage.text, type: "text", skip: false };
@@ -102,9 +102,15 @@ function previewFromContent(
     return { text: "위치", type: "location", skip: false };
   const poll = msg.pollCreationMessage ?? msg.pollCreationMessageV2 ?? msg.pollCreationMessageV3;
   if (poll) return { text: poll.name ?? "투표", type: "poll", skip: false };
-  if (msg.reactionMessage || msg.pollUpdateMessage)
-    return { text: "", type: "system", skip: true };
 
+  // No user-visible content — must be pure protocol metadata or key distribution.
+  if (msg.protocolMessage || msg.senderKeyDistributionMessage) {
+    return { text: "", type: "system", skip: true };
+  }
+  const keys = Object.keys(msg).filter((k) => msg[k as keyof WAMessageContent] != null);
+  if (keys.length === 1 && keys[0] === "messageContextInfo") {
+    return { text: "", type: "system", skip: true };
+  }
   return { text: "", type: "other", skip: false };
 }
 
@@ -217,6 +223,10 @@ export async function initWhatsApp(io: IO) {
   // JID form WhatsApp uses on a given event.
   const lidToPhone = new Map<string, string>();
   let restarting = false;
+  // Unix seconds. Set on connection.open. Messages older than this are treated
+  // as history and not surfaced in the UI even though Baileys still processes
+  // them internally (so LID mappings and session state stay current).
+  let connectedAt = 0;
 
   function recordLid(contact: { id?: string | null; lid?: string | null } | undefined | null) {
     if (!contact?.id || !contact.lid) return;
@@ -542,9 +552,13 @@ export async function initWhatsApp(io: IO) {
         auth: state,
         logger,
         browser: Browsers.macOS("Desktop"),
-        // History sync disabled — only live messages from connection time onwards.
+        // We let Baileys do its normal history sync — disabling it caused the
+        // "DANGER: PREVENTS BAILEYS FROM ACCESSING INITIAL LID MAPPINGS"
+        // warning and led to dropped messages. We filter history out of the UI
+        // ourselves below by ignoring messaging-history.set chats/messages and
+        // dropping messages older than the connection timestamp.
         syncFullHistory: false,
-        shouldSyncHistoryMessage: () => false,
+        shouldSyncHistoryMessage: () => true,
         markOnlineOnConnect: false,
         // Allow Baileys more chances to recover failed message decryption via
         // retry receipts before giving up (default is fairly low and we see
@@ -617,6 +631,7 @@ export async function initWhatsApp(io: IO) {
             me: me ? { id: me.id, name: me.name ?? me.verifiedName ?? "Me" } : undefined,
           };
           currentQr = null;
+          connectedAt = Math.floor(Date.now() / 1000);
           io.emit("status", status);
           io.emit("chats", Array.from(chats.values()));
           // Replenish our prekey bundle on the server so peers can establish
@@ -680,8 +695,17 @@ export async function initWhatsApp(io: IO) {
         }
       });
 
-      sock.ev.on("messages.upsert", ({ messages: msgs }) => {
+      sock.ev.on("messages.upsert", ({ messages: msgs, type }) => {
         for (const m of msgs) {
+          // Drop messages that predate this connection — those are history
+          // replay (Baileys keeps them for its internal state but we don't
+          // want them cluttering the UI).
+          const tsRaw = m.messageTimestamp;
+          const ts =
+            typeof tsRaw === "number" ? tsRaw : tsRaw ? Number(tsRaw) : 0;
+          if (type !== "notify" && ts > 0 && connectedAt > 0 && ts < connectedAt - 5) {
+            continue;
+          }
           upsertMessage(m, true);
         }
       });
