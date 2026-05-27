@@ -9,6 +9,8 @@ export type ChatInfo = {
   isGroup: boolean;
   lastMessage?: string;
   lastMessageTime?: number;
+  lastMessageFromMe?: boolean;
+  lastMessageStatus?: MessageStatus;
   unreadCount: number;
 };
 

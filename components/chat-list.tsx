@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { ChatInfo } from "@/lib/whatsapp/types";
+import type { ChatInfo, MessageStatus } from "@/lib/whatsapp/types";
 import { Avatar } from "./avatar";
 
 export function ChatList({
@@ -77,7 +77,10 @@ export function ChatList({
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 flex items-center gap-2">
+              <div className="mt-0.5 flex items-center gap-1.5">
+                {c.lastMessageFromMe && c.lastMessageStatus ? (
+                  <ChatStatusIcon status={c.lastMessageStatus} />
+                ) : null}
                 <span className="min-w-0 flex-1 truncate text-[13px] text-wa-text-muted">
                   {c.lastMessage ?? ""}
                 </span>
@@ -92,6 +95,52 @@ export function ChatList({
         );
       })}
     </div>
+  );
+}
+
+function ChatStatusIcon({ status }: { status: MessageStatus }) {
+  if (status === "pending") {
+    return (
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+        className="shrink-0 text-wa-text-muted/70"
+      >
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M8 4.5v3.7l2.3 1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  const colorClass = status === "read" ? "text-sky-400" : "text-wa-text-muted/70";
+  return (
+    <svg
+      width="15"
+      height="11"
+      viewBox="0 0 16 12"
+      fill="none"
+      aria-hidden="true"
+      className={`shrink-0 ${colorClass}`}
+    >
+      <path
+        d="M1 6.4 4 9.5 9.6 2.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {status === "delivered" || status === "read" ? (
+        <path
+          d="M6.4 9.5 12 2.5"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : null}
+    </svg>
   );
 }
 

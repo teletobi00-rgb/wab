@@ -69,19 +69,40 @@ export function ChatApp() {
           next[idx] = { ...next[idx], ...message };
           return { ...prev, [jid]: next };
         }
+        // Replace an optimistic "pending" placeholder we added on send,
+        // matched by same chat + same text + close timestamp.
+        if (message.fromMe && message.text) {
+          const tempIdx = list.findIndex(
+            (m) =>
+              m.id.startsWith("local-") &&
+              m.fromMe &&
+              m.text === message.text &&
+              Math.abs(m.timestamp - message.timestamp) < 60,
+          );
+          if (tempIdx >= 0) {
+            const next = list.slice();
+            next[tempIdx] = message;
+            return { ...prev, [jid]: next };
+          }
+        }
         return {
           ...prev,
           [jid]: [...list, message].sort((a, b) => a.timestamp - b.timestamp),
         };
       });
 
-      // Notification: only for incoming, when chat not focused
       if (message.fromMe) return;
       const isCurrent = selectedJidRef.current === jid;
       const isVisible =
         typeof document !== "undefined" && document.visibilityState === "visible";
       const hasFocus = typeof document !== "undefined" && document.hasFocus();
-      if (isCurrent && isVisible && hasFocus) return;
+      const inFocus = isCurrent && isVisible && hasFocus;
+
+      // Auto mark-read when the message arrives in the chat the user is on.
+      if (inFocus) {
+        socket.emit("mark-read", { jid });
+        return;
+      }
 
       const chat = chatsRef.current.find((c) => c.jid === jid);
       const title = chat?.name ?? message.pushName ?? "새 메시지";
@@ -162,9 +183,26 @@ export function ChatApp() {
             chat={selectedChat}
             messages={selectedMessages}
             presence={selectedPresence}
-            onSend={(text, replyToId) =>
-              socket?.emit("send-message", { jid: selectedChat.jid, text, replyToId })
-            }
+            onSend={(text, replyToId) => {
+              if (!socket) return;
+              // Optimistic add: render the message immediately as "pending"
+              // and let onMessageUpsert swap it in once the server echoes.
+              const tempId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+              const optimistic: MessageItem = {
+                id: tempId,
+                jid: selectedChat.jid,
+                fromMe: true,
+                text,
+                type: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+                status: "pending",
+              };
+              setMessagesByJid((prev) => ({
+                ...prev,
+                [selectedChat.jid]: [...(prev[selectedChat.jid] ?? []), optimistic],
+              }));
+              socket.emit("send-message", { jid: selectedChat.jid, text, replyToId });
+            }}
             onTyping={(isTyping) =>
               socket?.emit("typing", { jid: selectedChat.jid, isTyping })
             }

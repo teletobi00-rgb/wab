@@ -340,10 +340,53 @@ export async function initWhatsApp(io: IO) {
       isGroup: c.jid.endsWith("@g.us"),
       lastMessage: c.lastMessage ?? existing?.lastMessage,
       lastMessageTime: c.lastMessageTime ?? existing?.lastMessageTime,
+      lastMessageFromMe: c.lastMessageFromMe ?? existing?.lastMessageFromMe,
+      lastMessageStatus: c.lastMessageStatus ?? existing?.lastMessageStatus,
       unreadCount: c.unreadCount ?? existing?.unreadCount ?? 0,
     };
     chats.set(c.jid, merged);
     return merged;
+  }
+
+  function mergeLidChatIntoPhone(lid: string, phone: string) {
+    const lidChat = chats.get(lid);
+    if (!lidChat) return;
+    const existing = chats.get(phone);
+    const lidNewer = (lidChat.lastMessageTime ?? 0) > (existing?.lastMessageTime ?? 0);
+    const merged: ChatInfo = {
+      jid: phone,
+      name: existing?.name ?? lidChat.name,
+      isGroup: lidChat.isGroup,
+      lastMessage: lidNewer ? lidChat.lastMessage : existing?.lastMessage,
+      lastMessageTime: Math.max(
+        lidChat.lastMessageTime ?? 0,
+        existing?.lastMessageTime ?? 0,
+      ) || undefined,
+      lastMessageFromMe: lidNewer ? lidChat.lastMessageFromMe : existing?.lastMessageFromMe,
+      lastMessageStatus: lidNewer ? lidChat.lastMessageStatus : existing?.lastMessageStatus,
+      unreadCount: (existing?.unreadCount ?? 0) + lidChat.unreadCount,
+    };
+    chats.set(phone, merged);
+    chats.delete(lid);
+
+    const lidMsgs = messages.get(lid);
+    if (lidMsgs && lidMsgs.length > 0) {
+      const phoneMsgs = messages.get(phone) ?? [];
+      const seen = new Set<string>();
+      const combined = [...phoneMsgs, ...lidMsgs.map((m) => ({ ...m, jid: phone }))]
+        .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+        .sort((a, b) => a.timestamp - b.timestamp);
+      messages.set(phone, combined);
+    }
+    messages.delete(lid);
+
+    io.emit("chats", Array.from(chats.values()));
+  }
+
+  function recordLidMapping(lid: string, phone: string) {
+    if (lidToPhone.get(lid) === phone) return;
+    lidToPhone.set(lid, phone);
+    mergeLidChatIntoPhone(lid, phone);
   }
 
   function previewFor(item: MessageItem): string {
@@ -382,7 +425,8 @@ export async function initWhatsApp(io: IO) {
     // Baileys 7.x exposes the phone-number JID alongside the @lid form via
     // remoteJidAlt / participantAlt. Learn the mapping from the message keys
     // so every chat lands under the phone-number JID regardless of which form
-    // a particular event uses.
+    // a particular event uses. Discovering a new mapping also merges any
+    // duplicate @lid-keyed chat we'd already created into the phone one.
     const key = m.key as typeof m.key & {
       remoteJidAlt?: string | null;
       participantAlt?: string | null;
@@ -391,10 +435,10 @@ export async function initWhatsApp(io: IO) {
       key.remoteJid?.endsWith("@lid") &&
       key.remoteJidAlt?.endsWith("@s.whatsapp.net")
     ) {
-      lidToPhone.set(key.remoteJid, key.remoteJidAlt);
+      recordLidMapping(key.remoteJid, key.remoteJidAlt);
     }
     if (key.participant?.endsWith("@lid") && key.participantAlt?.endsWith("@s.whatsapp.net")) {
-      lidToPhone.set(key.participant, key.participantAlt);
+      recordLidMapping(key.participant, key.participantAlt);
     }
     const item: MessageItem = {
       id: m.key.id,
@@ -502,10 +546,18 @@ export async function initWhatsApp(io: IO) {
     messages.set(item.jid, list);
 
     const preview = previewFor(item);
+    const existingChat = chats.get(item.jid);
+    // Only bump the chat preview if this message is at least as recent as
+    // what's already there (history events can arrive after live ones).
+    const isLatest = (existingChat?.lastMessageTime ?? 0) <= item.timestamp;
+    const incrementUnread = broadcast && !item.fromMe ? 1 : 0;
     const updated = upsertChat({
       jid: item.jid,
-      lastMessage: preview,
-      lastMessageTime: item.timestamp,
+      lastMessage: isLatest ? preview : existingChat?.lastMessage,
+      lastMessageTime: isLatest ? item.timestamp : existingChat?.lastMessageTime,
+      lastMessageFromMe: isLatest ? item.fromMe : existingChat?.lastMessageFromMe,
+      lastMessageStatus: isLatest ? item.status : existingChat?.lastMessageStatus,
+      unreadCount: (existingChat?.unreadCount ?? 0) + incrementUnread,
     });
 
     if (broadcast) {
@@ -670,14 +722,15 @@ export async function initWhatsApp(io: IO) {
       sock.ev.on("chats.upsert", (newChats) => {
         for (const c of newChats) {
           if (!c.id) continue;
-          if (c.id.endsWith("@g.us") && c.name) applyGroupName(c.id, c.name);
+          const jid = canonicalJid(c.id);
+          if (jid.endsWith("@g.us") && c.name) applyGroupName(jid, c.name);
           upsertChat({
-            jid: c.id,
-            name: c.name ?? contactNames.get(c.id) ?? undefined,
+            jid,
+            name: c.name ?? contactNames.get(jid) ?? undefined,
             unreadCount: c.unreadCount ?? 0,
           });
-          if (c.id.endsWith("@g.us") && !groupSubjects.has(c.id)) {
-            ensureGroupName(c.id).catch(() => {});
+          if (jid.endsWith("@g.us") && !groupSubjects.has(jid)) {
+            ensureGroupName(jid).catch(() => {});
           }
         }
         io.emit("chats", Array.from(chats.values()));
@@ -686,9 +739,10 @@ export async function initWhatsApp(io: IO) {
       sock.ev.on("chats.update", (updates) => {
         for (const c of updates) {
           if (!c.id) continue;
-          if (c.id.endsWith("@g.us") && c.name) applyGroupName(c.id, c.name);
+          const jid = canonicalJid(c.id);
+          if (jid.endsWith("@g.us") && c.name) applyGroupName(jid, c.name);
           upsertChat({
-            jid: c.id,
+            jid,
             name: c.name ?? undefined,
             unreadCount: c.unreadCount ?? undefined,
           });
@@ -713,7 +767,8 @@ export async function initWhatsApp(io: IO) {
       sock.ev.on("messages.update", (updates) => {
         for (const u of updates) {
           if (!u.key.id || !u.key.remoteJid) continue;
-          const list = messages.get(u.key.remoteJid);
+          const jid = canonicalJid(u.key.remoteJid);
+          const list = messages.get(jid);
           if (!list) continue;
           const idx = list.findIndex((x) => x.id === u.key.id);
           if (idx < 0) continue;
@@ -721,11 +776,15 @@ export async function initWhatsApp(io: IO) {
           if (newStatus) {
             const merged = { ...list[idx], status: newStatus };
             list[idx] = merged;
-            io.emit("message-status", {
-              id: u.key.id,
-              jid: u.key.remoteJid,
-              status: newStatus,
-            });
+            io.emit("message-status", { id: u.key.id, jid, status: newStatus });
+            // If this is the chat's most recent message, propagate the status
+            // to the chat preview so the sidebar's read-receipt indicator updates.
+            const chat = chats.get(jid);
+            if (chat && chat.lastMessageTime === merged.timestamp && chat.lastMessageFromMe) {
+              const updatedChat: ChatInfo = { ...chat, lastMessageStatus: newStatus };
+              chats.set(jid, updatedChat);
+              io.emit("chat-update", updatedChat);
+            }
           }
         }
       });
