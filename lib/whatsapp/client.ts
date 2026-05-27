@@ -1,15 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import makeWASocket, {
-  Browsers,
-  DisconnectReason,
-  downloadMediaMessage,
-  fetchLatestBaileysVersion,
-  useMultiFileAuthState,
-  type WAMessage,
-  type WAMessageContent,
-  type WASocket,
-} from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcode from "qrcode";
 import type { Server as SocketIOServer } from "socket.io";
@@ -23,6 +13,13 @@ import type {
   QuotedInfo,
   Status,
 } from "./types";
+// Baileys is ESM-only; load it dynamically inside initWhatsApp so CJS output
+// (Electron production build) can interop with it.
+import type {
+  WAMessage,
+  WAMessageContent,
+  WASocket,
+} from "@whiskeysockets/baileys";
 
 const logger = pino({ level: "warn" });
 
@@ -173,7 +170,23 @@ function formatJid(jid: string): string {
   return num;
 }
 
+// Bypass TypeScript's CommonJS transformation of dynamic import() so that the
+// ESM-only baileys package can be loaded in the Electron production CJS build.
+type BaileysModule = typeof import("@whiskeysockets/baileys");
+const importBaileys = new Function(
+  "return import('@whiskeysockets/baileys')",
+) as () => Promise<BaileysModule>;
+
 export async function initWhatsApp(io: IO) {
+  const {
+    default: makeWASocket,
+    Browsers,
+    DisconnectReason,
+    downloadMediaMessage,
+    fetchLatestBaileysVersion,
+    useMultiFileAuthState,
+  } = await importBaileys();
+
   const AUTH_DIR = resolveAuthDir();
   const MEDIA_DIR = resolveMediaDir();
 
