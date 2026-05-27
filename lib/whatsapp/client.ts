@@ -521,6 +521,14 @@ export async function initWhatsApp(io: IO) {
         syncFullHistory: false,
         shouldSyncHistoryMessage: () => false,
         markOnlineOnConnect: false,
+        // When a recipient fails to decrypt a message we sent, WhatsApp asks us
+        // to resend via a retry receipt. Baileys calls this callback to fetch
+        // the original content from our local cache.
+        getMessage: async (key) => {
+          if (!key.id) return undefined;
+          const cached = rawMessages.get(key.id);
+          return cached?.message ?? undefined;
+        },
       });
 
       sock.ev.on("creds.update", saveCreds);
@@ -581,6 +589,12 @@ export async function initWhatsApp(io: IO) {
           currentQr = null;
           io.emit("status", status);
           io.emit("chats", Array.from(chats.values()));
+          // Replenish our prekey bundle on the server so peers can establish
+          // new sessions with us — running out of these causes the "Invalid
+          // PreKey ID" decryption failures we keep seeing.
+          sock?.uploadPreKeysToServerIfRequired().catch((err) => {
+            console.error("uploadPreKeysToServerIfRequired failed", err);
+          });
         }
       });
 
