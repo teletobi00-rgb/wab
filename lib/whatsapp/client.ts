@@ -763,10 +763,13 @@ export async function initWhatsApp(io: IO) {
           if (!c.id) continue;
           const jid = canonicalJid(c.id);
           if (jid.endsWith("@g.us") && c.name) applyGroupName(jid, c.name);
+          // Intentionally NOT forwarding c.unreadCount — Baileys was sending
+          // delayed phone-side values that clobbered locally-incremented
+          // counts (and 0 ?? undefined === 0 silently reset to zero).
+          // unread is now owned by upsertMessage (increment) + markRead (zero).
           upsertChat({
             jid,
             name: c.name ?? undefined,
-            unreadCount: c.unreadCount ?? undefined,
           });
         }
       });
