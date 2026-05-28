@@ -54,7 +54,19 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
   });
 
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
-    cors: { origin: "*" },
+    // Only accept WebSocket handshakes whose Origin is a loopback address (or
+    // has no Origin header — same-origin / Electron file:// navigations). This
+    // blocks a malicious page in another browser tab on the same machine from
+    // hijacking the socket (CSWSH), now that we also bind to 127.0.0.1 below.
+    cors: {
+      origin: (origin, callback) => {
+        if (!origin || isLoopbackOrigin(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error("Origin not allowed"), false);
+        }
+      },
+    },
     maxHttpBufferSize: MEDIA_MAX_BYTES,
   });
 
@@ -151,12 +163,24 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
   });
 
   return new Promise<{ port: number }>((resolve, reject) => {
-    httpServer.listen(options.port, () => {
+    // Bind to loopback only. Without an explicit host Node listens on 0.0.0.0,
+    // which would expose the user's entire WhatsApp session to anyone on the
+    // same LAN (no auth). This is a single-user desktop app, so 127.0.0.1.
+    httpServer.listen(options.port, "127.0.0.1", () => {
       const address = httpServer.address();
       const port = typeof address === "object" && address ? address.port : options.port;
-      console.log(`> Ready on http://${hostname}:${port}`);
+      console.log(`> Ready on http://127.0.0.1:${port}`);
       resolve({ port });
     });
     httpServer.on("error", reject);
   });
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
 }

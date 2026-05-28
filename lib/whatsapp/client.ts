@@ -52,6 +52,13 @@ type MediaCacheEntry = {
   fileName?: string;
 };
 
+// Caps for in-memory growth — this is a long-running tray app, so unbounded
+// Maps/arrays would leak over days of uptime.
+const RAW_MESSAGE_CAP = 1000; // originals kept only for retry-receipt resends
+const MESSAGES_PER_CHAT_CAP = 500; // rendered history per conversation
+// Disk cap for the media cache, swept on boot.
+const MEDIA_CACHE_MAX_BYTES = 500 * 1024 * 1024; // 500 MB
+
 function unwrap(msg: WAMessageContent | null | undefined): WAMessageContent | null {
   if (!msg) return null;
   if (msg.ephemeralMessage?.message) return unwrap(msg.ephemeralMessage.message);
@@ -265,24 +272,51 @@ export async function initWhatsApp(io: IO) {
   async function rehydrateMediaCache() {
     try {
       const files = await fs.readdir(MEDIA_DIR);
+      // Collect entries with size + mtime so we can both repopulate the cache
+      // map and enforce the disk cap (oldest-first eviction).
+      const entries: { id: string; size: number; mtimeMs: number }[] = [];
       for (const file of files) {
         if (file.endsWith(".json")) continue;
+        const full = path.join(MEDIA_DIR, file);
         try {
-          const meta = JSON.parse(
-            await fs.readFile(path.join(MEDIA_DIR, `${file}.json`), "utf-8"),
-          );
+          const meta = JSON.parse(await fs.readFile(`${full}.json`, "utf-8"));
+          const stat = await fs.stat(full);
           mediaCache.set(file, {
-            filePath: path.join(MEDIA_DIR, file),
+            filePath: full,
             mimeType: meta.mimeType,
             fileName: meta.fileName,
           });
+          entries.push({ id: file, size: stat.size, mtimeMs: stat.mtimeMs });
         } catch {
           // Missing or invalid sidecar — skip
         }
       }
+      await sweepMediaCache(entries);
     } catch {
       // Directory empty or missing — fine
     }
+  }
+
+  async function sweepMediaCache(
+    entries: { id: string; size: number; mtimeMs: number }[],
+  ) {
+    let total = entries.reduce((sum, e) => sum + e.size, 0);
+    if (total <= MEDIA_CACHE_MAX_BYTES) return;
+    // Evict oldest files until back under the cap.
+    const oldestFirst = entries.slice().sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const e of oldestFirst) {
+      if (total <= MEDIA_CACHE_MAX_BYTES) break;
+      const full = path.join(MEDIA_DIR, e.id);
+      try {
+        await fs.rm(full, { force: true });
+        await fs.rm(`${full}.json`, { force: true });
+        mediaCache.delete(e.id);
+        total -= e.size;
+      } catch (err) {
+        console.error("media sweep failed for", e.id, err);
+      }
+    }
+    console.log(`media cache swept, now ~${Math.round(total / 1024 / 1024)} MB`);
   }
 
   function getDisplayName(jid: string): string {
@@ -534,7 +568,15 @@ export async function initWhatsApp(io: IO) {
       item.participantJid = canonicalJid(item.participantJid);
     }
 
-    if (m.key.id) rawMessages.set(m.key.id, m);
+    if (m.key.id) {
+      // Refresh insertion order on re-set, then evict oldest beyond the cap.
+      rawMessages.delete(m.key.id);
+      rawMessages.set(m.key.id, m);
+      if (rawMessages.size > RAW_MESSAGE_CAP) {
+        const oldest = rawMessages.keys().next().value;
+        if (oldest !== undefined) rawMessages.delete(oldest);
+      }
+    }
 
     if (!item.fromMe && item.pushName) {
       const senderJid = item.participantJid ?? item.jid;
@@ -565,6 +607,11 @@ export async function initWhatsApp(io: IO) {
     }
     list.push(item);
     list.sort((a, b) => a.timestamp - b.timestamp);
+    // Keep only the most recent N per chat so a busy conversation doesn't grow
+    // without bound over a long session.
+    if (list.length > MESSAGES_PER_CHAT_CAP) {
+      list.splice(0, list.length - MESSAGES_PER_CHAT_CAP);
+    }
     messages.set(item.jid, list);
 
     const preview = previewFor(item);
