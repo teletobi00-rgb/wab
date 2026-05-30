@@ -249,6 +249,10 @@ export async function initWhatsApp(io: IO) {
   // Running total of bytes held in mediaCache, so we can evict at runtime
   // instead of only on boot.
   let mediaTotalBytes = 0;
+  // Maps a sent message's real id → the client's optimistic tempId, so the
+  // echo broadcast can carry the tempId back and the UI replaces the exact
+  // placeholder (instead of fuzzy text+timestamp matching).
+  const pendingTempIds = new Map<string, string>();
   // Maps @lid JIDs to their canonical @s.whatsapp.net counterpart so all
   // messages for a contact end up under the same chat regardless of which
   // JID form WhatsApp uses on a given event.
@@ -268,6 +272,12 @@ export async function initWhatsApp(io: IO) {
     if (contact.id.endsWith("@s.whatsapp.net") && contact.lid.endsWith("@lid")) {
       lidToPhone.set(contact.lid, contact.id);
     }
+  }
+
+  function consumeTempId(id: string): string | undefined {
+    const t = pendingTempIds.get(id);
+    if (t) pendingTempIds.delete(id);
+    return t;
   }
 
   function canonicalJid(jid: string | null | undefined): string {
@@ -642,7 +652,11 @@ export async function initWhatsApp(io: IO) {
       list[existingIdx] = merged;
       messages.set(item.jid, list);
       if (broadcast) {
-        io.emit("message-upsert", { jid: item.jid, message: merged });
+        io.emit("message-upsert", {
+          jid: item.jid,
+          message: merged,
+          tempId: consumeTempId(merged.id),
+        });
       }
       if (needsDownload) scheduleMediaDownload(m, item.jid);
       return;
@@ -673,7 +687,11 @@ export async function initWhatsApp(io: IO) {
     });
 
     if (broadcast) {
-      io.emit("message-upsert", { jid: item.jid, message: item });
+      io.emit("message-upsert", {
+        jid: item.jid,
+        message: item,
+        tempId: consumeTempId(item.id),
+      });
       io.emit("chat-update", updated);
     }
 
@@ -1017,10 +1035,18 @@ export async function initWhatsApp(io: IO) {
       const list = messages.get(jid) ?? [];
       return list.slice(-limit);
     },
-    sendMessage: async (jid: string, text: string, replyToId?: string) => {
+    sendMessage: async (
+      jid: string,
+      text: string,
+      replyToId?: string,
+      tempId?: string,
+    ): Promise<string | undefined> => {
       if (!sock || status.state !== "connected") throw new Error("Not connected");
       const quoted = replyToId ? rawMessages.get(replyToId) : undefined;
-      await sock.sendMessage(jid, { text }, quoted ? { quoted } : undefined);
+      const sent = await sock.sendMessage(jid, { text }, quoted ? { quoted } : undefined);
+      const id = sent?.key?.id ?? undefined;
+      if (id && tempId) pendingTempIds.set(id, tempId);
+      return id;
     },
     sendMedia: async (
       jid: string,
@@ -1029,23 +1055,28 @@ export async function initWhatsApp(io: IO) {
       buffer: Buffer,
       caption?: string,
       replyToId?: string,
-    ) => {
+      tempId?: string,
+    ): Promise<string | undefined> => {
       if (!sock || status.state !== "connected") throw new Error("Not connected");
       const opts = replyToId ? { quoted: rawMessages.get(replyToId) } : undefined;
       const quotedOpts = opts?.quoted ? { quoted: opts.quoted } : undefined;
+      let sent: Awaited<ReturnType<NonNullable<typeof sock>["sendMessage"]>> | undefined;
       if (mimeType.startsWith("image/")) {
-        await sock.sendMessage(jid, { image: buffer, caption, mimetype: mimeType }, quotedOpts);
+        sent = await sock.sendMessage(jid, { image: buffer, caption, mimetype: mimeType }, quotedOpts);
       } else if (mimeType.startsWith("video/")) {
-        await sock.sendMessage(jid, { video: buffer, caption, mimetype: mimeType }, quotedOpts);
+        sent = await sock.sendMessage(jid, { video: buffer, caption, mimetype: mimeType }, quotedOpts);
       } else if (mimeType.startsWith("audio/")) {
-        await sock.sendMessage(jid, { audio: buffer, mimetype: mimeType }, quotedOpts);
+        sent = await sock.sendMessage(jid, { audio: buffer, mimetype: mimeType }, quotedOpts);
       } else {
-        await sock.sendMessage(
+        sent = await sock.sendMessage(
           jid,
           { document: buffer, mimetype: mimeType, fileName, caption },
           quotedOpts,
         );
       }
+      const id = sent?.key?.id ?? undefined;
+      if (id && tempId) pendingTempIds.set(id, tempId);
+      return id;
     },
     getMediaEntry: (id: string) => mediaCache.get(id),
     markRead: async (jid: string) => {
@@ -1111,6 +1142,7 @@ export async function initWhatsApp(io: IO) {
       mediaCache.clear();
       mediaTotalBytes = 0;
       lidToPhone.clear();
+      pendingTempIds.clear();
       await fs.rm(AUTH_DIR, { recursive: true, force: true });
       await fs.rm(MEDIA_DIR, { recursive: true, force: true });
       await fs.mkdir(AUTH_DIR, { recursive: true });

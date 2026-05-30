@@ -29,7 +29,7 @@ export type MessageType =
   | "system"
   | "other";
 
-export type MessageStatus = "pending" | "sent" | "delivered" | "read";
+export type MessageStatus = "pending" | "sent" | "delivered" | "read" | "failed";
 
 export type MediaInfo = {
   url: string;

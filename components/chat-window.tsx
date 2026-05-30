@@ -569,6 +569,13 @@ function mediaPlaceholder(m: MessageItem): string {
 }
 
 function StatusIcon({ status }: { status: MessageStatus }) {
+  if (status === "failed") {
+    return (
+      <span className="font-semibold text-rose-400" title="전송 실패">
+        ⚠ 실패
+      </span>
+    );
+  }
   if (status === "pending") {
     return (
       <svg

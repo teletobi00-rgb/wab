@@ -15,21 +15,27 @@ export type SendMediaPayload = {
   data: ArrayBuffer;
   caption?: string;
   replyToId?: string;
+  tempId?: string;
 };
+
+export type SendAck = { ok: boolean; id?: string };
 
 export type ServerToClientEvents = {
   qr: (data: { qr: string }) => void;
   status: (status: Status) => void;
   chats: (chats: ChatInfo[]) => void;
   "chat-update": (chat: ChatInfo) => void;
-  "message-upsert": (data: { jid: string; message: MessageItem }) => void;
+  "message-upsert": (data: { jid: string; message: MessageItem; tempId?: string }) => void;
   "message-status": (update: MessageStatusUpdate) => void;
   presence: (presence: PresenceUpdate) => void;
 };
 
 export type ClientToServerEvents = {
-  "send-message": (data: { jid: string; text: string; replyToId?: string }) => void;
-  "send-media": (data: SendMediaPayload) => void;
+  "send-message": (
+    data: { jid: string; text: string; replyToId?: string; tempId?: string },
+    ack?: (res: SendAck) => void,
+  ) => void;
+  "send-media": (data: SendMediaPayload, ack?: (res: SendAck) => void) => void;
   "load-messages": (
     data: { jid: string; limit?: number },
     ack: (msgs: MessageItem[]) => void,

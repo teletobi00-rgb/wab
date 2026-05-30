@@ -81,24 +81,39 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     if (qr) socket.emit("qr", { qr });
     socket.emit("chats", wa.getChats());
 
-    socket.on("send-message", async ({ jid, text, replyToId }) => {
+    socket.on("send-message", async ({ jid, text, replyToId, tempId }, ack) => {
       try {
-        await wa?.sendMessage(jid, text, replyToId);
+        const id = await wa?.sendMessage(jid, text, replyToId, tempId);
+        ack?.({ ok: true, id });
       } catch (err) {
         console.error("send-message failed", err);
+        ack?.({ ok: false });
       }
     });
 
-    socket.on("send-media", async ({ jid, fileName, mimeType, data, caption, replyToId }) => {
-      try {
-        const buffer = Buffer.isBuffer(data)
-          ? (data as Buffer)
-          : Buffer.from(data as ArrayBuffer);
-        await wa?.sendMedia(jid, fileName, mimeType, buffer, caption, replyToId);
-      } catch (err) {
-        console.error("send-media failed", err);
-      }
-    });
+    socket.on(
+      "send-media",
+      async ({ jid, fileName, mimeType, data, caption, replyToId, tempId }, ack) => {
+        try {
+          const buffer = Buffer.isBuffer(data)
+            ? (data as Buffer)
+            : Buffer.from(data as ArrayBuffer);
+          const id = await wa?.sendMedia(
+            jid,
+            fileName,
+            mimeType,
+            buffer,
+            caption,
+            replyToId,
+            tempId,
+          );
+          ack?.({ ok: true, id });
+        } catch (err) {
+          console.error("send-media failed", err);
+          ack?.({ ok: false });
+        }
+      },
+    );
 
     socket.on("load-messages", ({ jid, limit }, ack) => {
       const msgs = wa?.loadMessages(jid, limit ?? 50) ?? [];

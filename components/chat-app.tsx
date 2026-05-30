@@ -18,6 +18,10 @@ import { NewChatModal } from "./new-chat-modal";
 import { QrLogin } from "./qr-login";
 import { SearchBar } from "./search-bar";
 
+// Mirror the server's per-chat history cap so a long-lived client session
+// doesn't accumulate unbounded message arrays in memory.
+const MESSAGES_PER_CHAT_CAP = 500;
+
 export function ChatApp() {
   const { socket, connected: socketConnected } = useSocket();
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
@@ -62,35 +66,40 @@ export function ChatApp() {
         return sortChats(next);
       });
     };
-    const onMessageUpsert = ({ jid, message }: { jid: string; message: MessageItem }) => {
+    const onMessageUpsert = ({
+      jid,
+      message,
+      tempId,
+    }: {
+      jid: string;
+      message: MessageItem;
+      tempId?: string;
+    }) => {
       setMessagesByJid((prev) => {
         const list = prev[jid] ?? [];
+        // 1) Exact optimistic replacement: the server echoes back the tempId
+        // we sent, so we replace the precise placeholder (no fuzzy matching).
+        if (tempId) {
+          const ti = list.findIndex((m) => m.id === tempId);
+          if (ti >= 0) {
+            const next = list.slice();
+            next[ti] = message;
+            return { ...prev, [jid]: next };
+          }
+        }
+        // 2) Already present (e.g. status/media update): merge in place.
         const idx = list.findIndex((m) => m.id === message.id);
         if (idx >= 0) {
           const next = list.slice();
           next[idx] = { ...next[idx], ...message };
           return { ...prev, [jid]: next };
         }
-        // Replace an optimistic "pending" placeholder we added on send,
-        // matched by same chat + same text + close timestamp.
-        if (message.fromMe && message.text) {
-          const tempIdx = list.findIndex(
-            (m) =>
-              m.id.startsWith("local-") &&
-              m.fromMe &&
-              m.text === message.text &&
-              Math.abs(m.timestamp - message.timestamp) < 60,
-          );
-          if (tempIdx >= 0) {
-            const next = list.slice();
-            next[tempIdx] = message;
-            return { ...prev, [jid]: next };
-          }
+        // 3) New message: append, capped to mirror the server's per-chat limit.
+        const appended = [...list, message].sort((a, b) => a.timestamp - b.timestamp);
+        if (appended.length > MESSAGES_PER_CHAT_CAP) {
+          appended.splice(0, appended.length - MESSAGES_PER_CHAT_CAP);
         }
-        return {
-          ...prev,
-          [jid]: [...list, message].sort((a, b) => a.timestamp - b.timestamp),
-        };
+        return { ...prev, [jid]: appended };
       });
 
       if (message.fromMe) return;
@@ -188,12 +197,14 @@ export function ChatApp() {
             presence={selectedPresence}
             onSend={(text, replyToId) => {
               if (!socket) return;
-              // Optimistic add: render the message immediately as "pending"
-              // and let onMessageUpsert swap it in once the server echoes.
+              // Optimistic add: render the message immediately as "pending".
+              // The server echoes back our tempId so onMessageUpsert can swap
+              // the exact placeholder; the ack surfaces a failed send.
               const tempId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+              const jid = selectedChat.jid;
               const optimistic: MessageItem = {
                 id: tempId,
-                jid: selectedChat.jid,
+                jid,
                 fromMe: true,
                 text,
                 type: "text",
@@ -202,22 +213,40 @@ export function ChatApp() {
               };
               setMessagesByJid((prev) => ({
                 ...prev,
-                [selectedChat.jid]: [...(prev[selectedChat.jid] ?? []), optimistic],
+                [jid]: [...(prev[jid] ?? []), optimistic],
               }));
-              socket.emit("send-message", { jid: selectedChat.jid, text, replyToId });
+              socket.emit("send-message", { jid, text, replyToId, tempId }, (res) => {
+                setMessagesByJid((prev) => {
+                  const list = prev[jid];
+                  if (!list) return prev;
+                  const ti = list.findIndex((m) => m.id === tempId);
+                  if (ti < 0) return prev; // echo already replaced it
+                  const next = list.slice();
+                  next[ti] = res.ok
+                    ? { ...next[ti], id: res.id ?? next[ti].id }
+                    : { ...next[ti], status: "failed" };
+                  return { ...prev, [jid]: next };
+                });
+              });
             }}
             onTyping={(isTyping) =>
               socket?.emit("typing", { jid: selectedChat.jid, isTyping })
             }
             onSendMedia={(fileName, mimeType, data, caption, replyToId) =>
-              socket?.emit("send-media", {
-                jid: selectedChat.jid,
-                fileName,
-                mimeType,
-                data,
-                caption,
-                replyToId,
-              })
+              socket?.emit(
+                "send-media",
+                {
+                  jid: selectedChat.jid,
+                  fileName,
+                  mimeType,
+                  data,
+                  caption,
+                  replyToId,
+                },
+                (res) => {
+                  if (!res.ok) alert(`'${fileName}' 전송에 실패했습니다.`);
+                },
+              )
             }
           />
         ) : (
