@@ -11,6 +11,7 @@ export type ChatInfo = {
   lastMessageTime?: number;
   lastMessageFromMe?: boolean;
   lastMessageStatus?: MessageStatus;
+  lastMessageId?: string;
   unreadCount: number;
 };
 

@@ -9,6 +9,15 @@ const PRODUCT = "WAB";
 app.setName(PRODUCT);
 app.setAppUserModelId("com.wab.app");
 
+// Keep the tray app alive on unexpected errors instead of letting an
+// unhandled rejection silently tear down the main process.
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException:", err);
+});
+
 const userDataPath = app.getPath("userData");
 process.env.WAB_AUTH_DIR = path.join(userDataPath, "auth");
 process.env.WAB_MEDIA_DIR = path.join(userDataPath, "media");
@@ -237,7 +246,7 @@ app.on("activate", () => {
     return;
   }
   bootServer()
-    .then((port: number) => createMainWindow(`http://localhost:${port}`))
+    .then((port: number) => createMainWindow(`http://127.0.0.1:${port}`))
     .catch((err: unknown) => console.error("activate boot failed", err));
 });
 
@@ -245,7 +254,7 @@ app
   .whenReady()
   .then(async () => {
     try {
-      const url = process.env.WAB_DEV_URL ?? `http://localhost:${await bootServer()}`;
+      const url = process.env.WAB_DEV_URL ?? `http://127.0.0.1:${await bootServer()}`;
       createTray();
       await createMainWindow(url);
       setupAutoUpdater();

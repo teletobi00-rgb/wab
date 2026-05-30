@@ -50,14 +50,20 @@ type MediaCacheEntry = {
   filePath: string;
   mimeType: string;
   fileName?: string;
+  size: number;
 };
 
 // Caps for in-memory growth — this is a long-running tray app, so unbounded
 // Maps/arrays would leak over days of uptime.
 const RAW_MESSAGE_CAP = 1000; // originals kept only for retry-receipt resends
 const MESSAGES_PER_CHAT_CAP = 500; // rendered history per conversation
-// Disk cap for the media cache, swept on boot.
+// Disk + in-memory cap for the media cache, enforced on boot AND at runtime.
 const MEDIA_CACHE_MAX_BYTES = 500 * 1024 * 1024; // 500 MB
+// Messages older than this relative to the connection time are treated as
+// history-sync replay and hidden from the UI. Offline-delivered messages
+// (type "append") that arrived while we were briefly disconnected are newer
+// than this and stay visible — losing those was the whole bug.
+const HISTORY_CUTOFF_SECONDS = 24 * 60 * 60; // 1 day
 
 function unwrap(msg: WAMessageContent | null | undefined): WAMessageContent | null {
   if (!msg) return null;
@@ -240,11 +246,18 @@ export async function initWhatsApp(io: IO) {
   const contactNames = new Map<string, string>();
   const groupSubjects = new Map<string, string>();
   const mediaCache = new Map<string, MediaCacheEntry>();
+  // Running total of bytes held in mediaCache, so we can evict at runtime
+  // instead of only on boot.
+  let mediaTotalBytes = 0;
   // Maps @lid JIDs to their canonical @s.whatsapp.net counterpart so all
   // messages for a contact end up under the same chat regardless of which
   // JID form WhatsApp uses on a given event.
   const lidToPhone = new Map<string, string>();
   let restarting = false;
+  // Pending reconnect timer + socket generation, so overlapping reconnects
+  // can't spawn duplicate live sockets and stale events get ignored.
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeGen = 0;
   // Unix seconds. Set on connection.open. Messages older than this are treated
   // as history and not surfaced in the UI even though Baileys still processes
   // them internally (so LID mappings and session state stay current).
@@ -272,51 +285,65 @@ export async function initWhatsApp(io: IO) {
   async function rehydrateMediaCache() {
     try {
       const files = await fs.readdir(MEDIA_DIR);
-      // Collect entries with size + mtime so we can both repopulate the cache
-      // map and enforce the disk cap (oldest-first eviction).
-      const entries: { id: string; size: number; mtimeMs: number }[] = [];
+      // Collect entries with size + mtime, then populate the Map in mtime
+      // order so the Map's iteration order is oldest-first — runtime eviction
+      // relies on that (keys().next() === oldest).
+      const entries: { id: string; size: number; mtimeMs: number; meta: MediaCacheEntry }[] =
+        [];
       for (const file of files) {
         if (file.endsWith(".json")) continue;
         const full = path.join(MEDIA_DIR, file);
         try {
           const meta = JSON.parse(await fs.readFile(`${full}.json`, "utf-8"));
           const stat = await fs.stat(full);
-          mediaCache.set(file, {
-            filePath: full,
-            mimeType: meta.mimeType,
-            fileName: meta.fileName,
+          entries.push({
+            id: file,
+            size: stat.size,
+            mtimeMs: stat.mtimeMs,
+            meta: {
+              filePath: full,
+              mimeType: meta.mimeType,
+              fileName: meta.fileName,
+              size: stat.size,
+            },
           });
-          entries.push({ id: file, size: stat.size, mtimeMs: stat.mtimeMs });
         } catch {
           // Missing or invalid sidecar — skip
         }
       }
-      await sweepMediaCache(entries);
+      entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+      mediaTotalBytes = 0;
+      for (const e of entries) {
+        mediaCache.set(e.id, e.meta);
+        mediaTotalBytes += e.size;
+      }
+      await enforceMediaCap();
     } catch {
       // Directory empty or missing — fine
     }
   }
 
-  async function sweepMediaCache(
-    entries: { id: string; size: number; mtimeMs: number }[],
-  ) {
-    let total = entries.reduce((sum, e) => sum + e.size, 0);
-    if (total <= MEDIA_CACHE_MAX_BYTES) return;
-    // Evict oldest files until back under the cap.
-    const oldestFirst = entries.slice().sort((a, b) => a.mtimeMs - b.mtimeMs);
-    for (const e of oldestFirst) {
-      if (total <= MEDIA_CACHE_MAX_BYTES) break;
-      const full = path.join(MEDIA_DIR, e.id);
-      try {
-        await fs.rm(full, { force: true });
-        await fs.rm(`${full}.json`, { force: true });
-        mediaCache.delete(e.id);
-        total -= e.size;
-      } catch (err) {
-        console.error("media sweep failed for", e.id, err);
-      }
+  async function removeMediaEntry(id: string) {
+    const e = mediaCache.get(id);
+    if (!e) return;
+    mediaCache.delete(id);
+    mediaTotalBytes = Math.max(0, mediaTotalBytes - e.size);
+    try {
+      await fs.rm(e.filePath, { force: true });
+      await fs.rm(`${e.filePath}.json`, { force: true });
+    } catch (err) {
+      console.error("media evict failed for", id, err);
     }
-    console.log(`media cache swept, now ~${Math.round(total / 1024 / 1024)} MB`);
+  }
+
+  // Evict oldest cached media until under the cap. Runs after every download
+  // and on boot, so a long session can't grow the cache without bound.
+  async function enforceMediaCap() {
+    while (mediaTotalBytes > MEDIA_CACHE_MAX_BYTES && mediaCache.size > 0) {
+      const oldest = mediaCache.keys().next().value;
+      if (oldest === undefined) break;
+      await removeMediaEntry(oldest);
+    }
   }
 
   function getDisplayName(jid: string): string {
@@ -394,6 +421,7 @@ export async function initWhatsApp(io: IO) {
       lastMessageTime: c.lastMessageTime ?? existing?.lastMessageTime,
       lastMessageFromMe: c.lastMessageFromMe ?? existing?.lastMessageFromMe,
       lastMessageStatus: c.lastMessageStatus ?? existing?.lastMessageStatus,
+      lastMessageId: c.lastMessageId ?? existing?.lastMessageId,
       unreadCount: c.unreadCount ?? existing?.unreadCount ?? 0,
     };
     chats.set(c.jid, merged);
@@ -513,6 +541,12 @@ export async function initWhatsApp(io: IO) {
 
   async function downloadMedia(m: WAMessage): Promise<MediaCacheEntry | null> {
     if (!m.key.id || !m.message) return null;
+    // Defense in depth: the message id becomes a filename, so never allow path
+    // separators / traversal (Baileys ids are normally safe base16/64 strings).
+    if (/[/\\]|\.\./.test(m.key.id)) {
+      logger.warn({ id: m.key.id }, "unsafe media id, skipping cache");
+      return null;
+    }
     const meta = getMediaMeta(m.message);
     if (!meta || !sock) return null;
     try {
@@ -527,8 +561,16 @@ export async function initWhatsApp(io: IO) {
         filePath,
         mimeType: meta.mimeType,
         fileName: meta.fileName,
+        size: buffer.length,
       };
+      // Account for re-download of the same id, refresh insertion order, then
+      // evict oldest if we're over the cap.
+      const prev = mediaCache.get(m.key.id);
+      if (prev) mediaTotalBytes -= prev.size;
+      mediaCache.delete(m.key.id);
       mediaCache.set(m.key.id, entry);
+      mediaTotalBytes += buffer.length;
+      await enforceMediaCap();
       return entry;
     } catch (err) {
       console.error("downloadMedia failed", m.key.id, err);
@@ -626,6 +668,7 @@ export async function initWhatsApp(io: IO) {
       lastMessageTime: isLatest ? item.timestamp : existingChat?.lastMessageTime,
       lastMessageFromMe: isLatest ? item.fromMe : existingChat?.lastMessageFromMe,
       lastMessageStatus: isLatest ? item.status : existingChat?.lastMessageStatus,
+      lastMessageId: isLatest ? item.id : existingChat?.lastMessageId,
       unreadCount: (existingChat?.unreadCount ?? 0) + incrementUnread,
     });
 
@@ -642,29 +685,52 @@ export async function initWhatsApp(io: IO) {
   }
 
   function scheduleMediaDownload(m: WAMessage, jid: string) {
-    downloadMedia(m).then((entry) => {
-      if (!entry || !m.key.id) return;
-      const list = messages.get(jid);
-      if (!list) return;
-      const idx = list.findIndex((x) => x.id === m.key.id);
-      if (idx < 0) return;
-      const merged = {
-        ...list[idx],
-        media: {
-          url: `/media/${m.key.id}`,
-          mimeType: entry.mimeType,
-          fileName: entry.fileName,
-        },
-      };
-      list[idx] = merged;
-      io.emit("message-upsert", { jid, message: merged });
-    });
+    downloadMedia(m)
+      .then((entry) => {
+        if (!entry || !m.key.id) return;
+        const list = messages.get(jid);
+        if (!list) return;
+        const idx = list.findIndex((x) => x.id === m.key.id);
+        if (idx < 0) return;
+        const merged = {
+          ...list[idx],
+          media: {
+            url: `/media/${m.key.id}`,
+            mimeType: entry.mimeType,
+            fileName: entry.fileName,
+          },
+        };
+        list[idx] = merged;
+        io.emit("message-upsert", { jid, message: merged });
+      })
+      .catch((err) => console.error("scheduleMediaDownload failed", err));
+  }
+
+  function scheduleReconnect(delayMs: number) {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      start().catch((e) => console.error("reconnect failed", e));
+    }, delayMs);
   }
 
   async function start() {
     if (restarting) return;
     restarting = true;
+    // Newest start() wins; events from any earlier socket are ignored via this
+    // generation token so overlapping reconnects can't corrupt state.
+    const myGen = ++activeGen;
     try {
+      // Tear down any prior socket before creating a new one (Baileys removes
+      // its listeners on end(), so the old socket's events stop firing).
+      if (sock) {
+        try {
+          sock.end(undefined);
+        } catch {
+          // already closed
+        }
+        sock = null;
+      }
       const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
       const { version } = await fetchLatestBaileysVersion();
 
@@ -699,6 +765,8 @@ export async function initWhatsApp(io: IO) {
       sock.ev.on("creds.update", saveCreds);
 
       sock.ev.on("connection.update", async (update) => {
+        // Ignore events from a socket superseded by a newer start().
+        if (myGen !== activeGen) return;
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -735,13 +803,9 @@ export async function initWhatsApp(io: IO) {
             } catch (err) {
               console.error("auth wipe failed", err);
             }
-            setTimeout(() => {
-              start().catch((e) => console.error("restart after logout failed", e));
-            }, 1000);
+            scheduleReconnect(1000);
           } else {
-            setTimeout(() => {
-              start().catch((e) => console.error("restart failed", e));
-            }, 2000);
+            scheduleReconnect(2000);
           }
         }
 
@@ -823,13 +887,20 @@ export async function initWhatsApp(io: IO) {
 
       sock.ev.on("messages.upsert", ({ messages: msgs, type }) => {
         for (const m of msgs) {
-          // Drop messages that predate this connection — those are history
-          // replay (Baileys keeps them for its internal state but we don't
-          // want them cluttering the UI).
+          // Hide only clearly-old history-sync replay. Messages delivered
+          // because we were offline arrive as type "append" with timestamps
+          // from while we were disconnected — those are recent (within
+          // HISTORY_CUTOFF_SECONDS) and must stay visible, otherwise messages
+          // received while the laptop was asleep silently vanish. Dedup in
+          // upsertMessage handles any re-delivery.
           const tsRaw = m.messageTimestamp;
-          const ts =
-            typeof tsRaw === "number" ? tsRaw : tsRaw ? Number(tsRaw) : 0;
-          if (type !== "notify" && ts > 0 && connectedAt > 0 && ts < connectedAt - 5) {
+          const ts = typeof tsRaw === "number" ? tsRaw : tsRaw ? Number(tsRaw) : 0;
+          if (
+            type !== "notify" &&
+            ts > 0 &&
+            connectedAt > 0 &&
+            ts < connectedAt - HISTORY_CUTOFF_SECONDS
+          ) {
             continue;
           }
           upsertMessage(m, true);
@@ -840,7 +911,11 @@ export async function initWhatsApp(io: IO) {
         for (const u of updates) {
           if (!u.key.id || !u.key.remoteJid) continue;
           const jid = canonicalJid(u.key.remoteJid);
-          const list = messages.get(jid);
+          // The message may have been stored under the canonical phone JID
+          // while this update still carries the raw @lid form (or vice versa
+          // if the mapping was learned later) — try both so status ticks don't
+          // silently fail for LID-merged chats.
+          const list = messages.get(jid) ?? messages.get(u.key.remoteJid);
           if (!list) continue;
           const idx = list.findIndex((x) => x.id === u.key.id);
           if (idx < 0) continue;
@@ -852,7 +927,7 @@ export async function initWhatsApp(io: IO) {
             // If this is the chat's most recent message, propagate the status
             // to the chat preview so the sidebar's read-receipt indicator updates.
             const chat = chats.get(jid);
-            if (chat && chat.lastMessageTime === merged.timestamp && chat.lastMessageFromMe) {
+            if (chat && chat.lastMessageId === u.key.id && chat.lastMessageFromMe) {
               const updatedChat: ChatInfo = { ...chat, lastMessageStatus: newStatus };
               chats.set(jid, updatedChat);
               io.emit("chat-update", updatedChat);
@@ -887,8 +962,12 @@ export async function initWhatsApp(io: IO) {
 
       restarting = false;
     } catch (err) {
+      // Don't throw — a failed first connect (e.g. fetchLatestBaileysVersion
+      // blocked by the network) shouldn't prevent the app/window from opening.
+      // Reconnect in the background instead.
+      console.error("start failed, scheduling reconnect", err);
       restarting = false;
-      throw err;
+      scheduleReconnect(3000);
     }
   }
 
@@ -1011,6 +1090,13 @@ export async function initWhatsApp(io: IO) {
       }
     },
     logout: async () => {
+      // Cancel any pending reconnect and invalidate the current socket's events
+      // (incl. its logged-out close handler) so they don't double-fire here.
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      activeGen++;
       try {
         if (sock) await sock.logout();
       } catch (err) {
@@ -1023,6 +1109,7 @@ export async function initWhatsApp(io: IO) {
       contactNames.clear();
       groupSubjects.clear();
       mediaCache.clear();
+      mediaTotalBytes = 0;
       lidToPhone.clear();
       await fs.rm(AUTH_DIR, { recursive: true, force: true });
       await fs.rm(MEDIA_DIR, { recursive: true, force: true });
@@ -1030,9 +1117,7 @@ export async function initWhatsApp(io: IO) {
       await fs.mkdir(MEDIA_DIR, { recursive: true });
       status = { state: "disconnected" };
       io.emit("status", status);
-      setTimeout(() => {
-        start().catch((e) => console.error("restart after logout failed", e));
-      }, 500);
+      scheduleReconnect(500);
     },
   };
 }
