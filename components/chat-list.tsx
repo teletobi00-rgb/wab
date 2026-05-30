@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ChatInfo, MessageStatus } from "@/lib/whatsapp/types";
 import { Avatar } from "./avatar";
 
@@ -9,22 +9,35 @@ export function ChatList({
   selectedJid,
   onSelect,
   query = "",
+  pinned,
+  muted,
+  onTogglePin,
+  onToggleMute,
 }: {
   chats: ChatInfo[];
   selectedJid: string | null;
   onSelect: (jid: string) => void;
   query?: string;
+  pinned: string[];
+  muted: string[];
+  onTogglePin: (jid: string) => void;
+  onToggleMute: (jid: string) => void;
 }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return chats;
-    return chats.filter((c) => {
-      if (c.name.toLowerCase().includes(q)) return true;
-      if (c.lastMessage?.toLowerCase().includes(q)) return true;
-      if (c.jid.toLowerCase().includes(q)) return true;
-      return false;
-    });
-  }, [chats, query]);
+    const base = !q
+      ? chats
+      : chats.filter(
+          (c) =>
+            c.name.toLowerCase().includes(q) ||
+            c.lastMessage?.toLowerCase().includes(q) ||
+            c.jid.toLowerCase().includes(q),
+        );
+    // Pinned chats float to the top; stable sort keeps the time order within.
+    return base
+      .slice()
+      .sort((a, b) => (pinned.includes(b.jid) ? 1 : 0) - (pinned.includes(a.jid) ? 1 : 0));
+  }, [chats, query, pinned]);
 
   if (chats.length === 0) {
     return (
@@ -49,50 +62,140 @@ export function ChatList({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {filtered.map((c) => {
-        const isSelected = selectedJid === c.jid;
-        return (
+      {filtered.map((c) => (
+        <ChatRow
+          key={c.jid}
+          chat={c}
+          isSelected={selectedJid === c.jid}
+          isPinned={pinned.includes(c.jid)}
+          isMuted={muted.includes(c.jid)}
+          onSelect={onSelect}
+          onTogglePin={onTogglePin}
+          onToggleMute={onToggleMute}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ChatRow({
+  chat: c,
+  isSelected,
+  isPinned,
+  isMuted,
+  onSelect,
+  onTogglePin,
+  onToggleMute,
+}: {
+  chat: ChatInfo;
+  isSelected: boolean;
+  isPinned: boolean;
+  isMuted: boolean;
+  onSelect: (jid: string) => void;
+  onTogglePin: (jid: string) => void;
+  onToggleMute: (jid: string) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menuOpen]);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(c.jid)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(c.jid);
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenuOpen(true);
+      }}
+      className={`group relative flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 ${
+        isSelected ? "bg-wa-panel-hover" : "border-b border-wa-border hover:bg-wa-panel-soft/60"
+      }`}
+    >
+      <Avatar name={c.name} isGroup={c.isGroup} size="lg" />
+      <div className="min-w-0 flex-1 border-b border-transparent">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1">
+            {isPinned ? <span className="shrink-0 text-[11px]">📌</span> : null}
+            {isMuted ? <span className="shrink-0 text-[11px]">🔇</span> : null}
+            <span className="truncate text-[15px] font-medium text-wa-text">{c.name}</span>
+          </span>
+          {c.lastMessageTime ? (
+            <span
+              className={`shrink-0 text-[11px] ${
+                c.unreadCount > 0 ? "text-wa-green" : "text-wa-text-muted"
+              }`}
+            >
+              {formatTime(c.lastMessageTime)}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          {c.lastMessageFromMe && c.lastMessageStatus ? (
+            <ChatStatusIcon status={c.lastMessageStatus} />
+          ) : null}
+          <span className="min-w-0 flex-1 truncate text-[13px] text-wa-text-muted">
+            {c.lastMessage ?? ""}
+          </span>
+          {c.unreadCount > 0 ? (
+            <span
+              className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${
+                isMuted ? "bg-wa-text-muted/60 text-black/70" : "bg-wa-green text-black/80"
+              }`}
+            >
+              {c.unreadCount}
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenuOpen((o) => !o);
+        }}
+        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-wa-panel-soft text-wa-text-muted opacity-0 shadow transition-opacity hover:text-wa-text group-hover:opacity-100"
+        aria-label="채팅 메뉴"
+      >
+        ⌄
+      </button>
+      {menuOpen ? (
+        <div className="absolute right-2 top-9 z-20 w-32 overflow-hidden rounded-md border border-wa-border bg-wa-panel-soft py-1 text-[13px] shadow-xl">
           <button
-            key={c.jid}
             type="button"
-            onClick={() => onSelect(c.jid)}
-            className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 ${
-              isSelected
-                ? "bg-wa-panel-hover"
-                : "border-b border-wa-border hover:bg-wa-panel-soft/60"
-            }`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin(c.jid);
+              setMenuOpen(false);
+            }}
+            className="block w-full px-3 py-1.5 text-left text-wa-text hover:bg-wa-panel-hover"
           >
-            <Avatar name={c.name} isGroup={c.isGroup} size="lg" />
-            <div className="min-w-0 flex-1 border-b border-transparent">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-[15px] font-medium text-wa-text">{c.name}</span>
-                {c.lastMessageTime ? (
-                  <span
-                    className={`shrink-0 text-[11px] ${
-                      c.unreadCount > 0 ? "text-wa-green" : "text-wa-text-muted"
-                    }`}
-                  >
-                    {formatTime(c.lastMessageTime)}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5">
-                {c.lastMessageFromMe && c.lastMessageStatus ? (
-                  <ChatStatusIcon status={c.lastMessageStatus} />
-                ) : null}
-                <span className="min-w-0 flex-1 truncate text-[13px] text-wa-text-muted">
-                  {c.lastMessage ?? ""}
-                </span>
-                {c.unreadCount > 0 ? (
-                  <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-wa-green px-1.5 text-[11px] font-semibold text-black/80">
-                    {c.unreadCount}
-                  </span>
-                ) : null}
-              </div>
-            </div>
+            {isPinned ? "고정 해제" : "📌 고정"}
           </button>
-        );
-      })}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleMute(c.jid);
+              setMenuOpen(false);
+            }}
+            className="block w-full px-3 py-1.5 text-left text-wa-text hover:bg-wa-panel-hover"
+          >
+            {isMuted ? "음소거 해제" : "🔇 음소거"}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

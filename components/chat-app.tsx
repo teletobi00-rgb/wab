@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useChatPrefs } from "@/lib/chat-prefs";
 import { matchKeyword, useKeywords } from "@/lib/keywords";
 import { useNotifications } from "@/lib/notifications";
 import { useSocket } from "@/lib/socket/client";
@@ -43,13 +44,19 @@ export function ChatApp() {
   const notif = useNotifications();
   const { theme, toggle: toggleTheme } = useTheme();
   const { keywords, add: addKeyword, remove: removeKeyword } = useKeywords();
+  const { pinned, muted, togglePin, toggleMute } = useChatPrefs();
   const selectedJidRef = useRef<string | null>(null);
   const chatsRef = useRef<ChatInfo[]>([]);
   const keywordsRef = useRef<string[]>([]);
+  const mutedRef = useRef<string[]>([]);
 
   useEffect(() => {
     keywordsRef.current = keywords;
   }, [keywords]);
+
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
 
   // Reflect total unread on the OS taskbar/dock via the Electron bridge.
   useEffect(() => {
@@ -150,6 +157,9 @@ export function ChatApp() {
         // A keyword hit still notifies even while the chat is focused.
         if (!matched) return;
       }
+
+      // Muted chats don't notify — unless a keyword hit overrides it.
+      if (mutedRef.current.includes(jid) && !matched) return;
 
       const chat = chatsRef.current.find((c) => c.jid === jid);
       const baseTitle = chat?.name ?? message.pushName ?? "새 메시지";
@@ -252,7 +262,16 @@ export function ChatApp() {
             <span className="font-medium text-wa-green">모두 읽음</span>
           </button>
         ) : null}
-        <ChatList chats={chats} selectedJid={selectedJid} onSelect={setSelectedJid} query={query} />
+        <ChatList
+          chats={chats}
+          selectedJid={selectedJid}
+          onSelect={setSelectedJid}
+          query={query}
+          pinned={pinned}
+          muted={muted}
+          onTogglePin={togglePin}
+          onToggleMute={toggleMute}
+        />
       </aside>
       <main className="flex flex-1 flex-col bg-wa-bg">
         {selectedChat ? (
