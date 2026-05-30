@@ -10,6 +10,8 @@ export function SettingsModal({
   scheduled,
   chatNameOf,
   onCancelScheduled,
+  theme,
+  onToggleTheme,
   onClose,
 }: {
   keywords: string[];
@@ -18,9 +20,13 @@ export function SettingsModal({
   scheduled: ScheduledItem[];
   chatNameOf: (jid: string) => string;
   onCancelScheduled: (id: string) => void;
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
   onClose: () => void;
 }) {
   const [input, setInput] = useState("");
+  const [autoLaunch, setAutoLaunch] = useState(false);
+  const [hasBridge, setHasBridge] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -29,6 +35,18 @@ export function SettingsModal({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.wab) return;
+    setHasBridge(true);
+    window.wab.getAutoLaunch().then(setAutoLaunch).catch(() => {});
+  }, []);
+
+  function toggleAutoLaunch() {
+    const next = !autoLaunch;
+    setAutoLaunch(next);
+    window.wab?.setAutoLaunch(next);
+  }
 
   function submit() {
     const v = input.trim();
@@ -146,6 +164,40 @@ export function SettingsModal({
               ))
             )}
           </div>
+        </div>
+
+        <div className="border-t border-wa-border px-5 py-4">
+          <h3 className="text-[13px] font-semibold text-wa-text">화면 / 앱</h3>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-[13px] text-wa-text">테마</span>
+            <button
+              type="button"
+              onClick={onToggleTheme}
+              className="rounded-md bg-wa-panel-soft px-3 py-1.5 text-[12px] text-wa-text hover:bg-wa-panel-hover"
+            >
+              {theme === "dark" ? "🌙 다크" : "☀️ 라이트"}
+            </button>
+          </div>
+          {hasBridge ? (
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-[13px] text-wa-text">윈도우 시작 시 자동 실행</span>
+              <button
+                type="button"
+                onClick={toggleAutoLaunch}
+                role="switch"
+                aria-checked={autoLaunch}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  autoLaunch ? "bg-wa-green" : "bg-wa-panel-hover"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                    autoLaunch ? "translate-x-[22px]" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </button>

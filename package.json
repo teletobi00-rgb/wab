@@ -71,6 +71,10 @@
       {
         "from": "build/tray@2x.png",
         "to": "tray@2x.png"
+      },
+      {
+        "from": "build/badge.png",
+        "to": "badge.png"
       }
     ],
     "asarUnpack": [

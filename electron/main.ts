@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { app, BrowserWindow, dialog, Menu, nativeImage, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
 
 const PRODUCT = "WAB";
@@ -38,6 +38,32 @@ function trayIconPath(): string {
     return path.join(process.resourcesPath, "tray.png");
   }
   return path.join(app.getAppPath(), "build", "tray.png");
+}
+
+function badgeIconPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "badge.png");
+  }
+  return path.join(app.getAppPath(), "build", "badge.png");
+}
+
+function setUnreadBadge(count: number) {
+  if (process.platform === "win32") {
+    if (mainWindow) {
+      if (count > 0) {
+        try {
+          mainWindow.setOverlayIcon(nativeImage.createFromPath(badgeIconPath()), `안 읽음 ${count}`);
+        } catch {
+          // overlay unsupported / icon missing — ignore
+        }
+      } else {
+        mainWindow.setOverlayIcon(null, "");
+      }
+    }
+  } else if (process.platform === "darwin") {
+    app.dock?.setBadge(count > 0 ? String(count) : "");
+  }
+  if (tray) tray.setToolTip(count > 0 ? `${PRODUCT} · 안 읽음 ${count}` : PRODUCT);
 }
 
 function showMainWindow() {
@@ -146,6 +172,7 @@ async function createMainWindow(url: string) {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -224,6 +251,14 @@ function setupAutoUpdater() {
     60 * 60 * 1000,
   );
 }
+
+ipcMain.on("wab:set-unread", (_e, count: number) => {
+  setUnreadBadge(Number(count) || 0);
+});
+ipcMain.on("wab:set-auto-launch", (_e, enabled: boolean) => {
+  app.setLoginItemSettings({ openAtLogin: !!enabled });
+});
+ipcMain.handle("wab:get-auto-launch", () => app.getLoginItemSettings().openAtLogin);
 
 app.on("second-instance", () => {
   if (mainWindow) {

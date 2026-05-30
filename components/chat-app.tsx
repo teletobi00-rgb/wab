@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { matchKeyword, useKeywords } from "@/lib/keywords";
 import { useNotifications } from "@/lib/notifications";
 import { useSocket } from "@/lib/socket/client";
+import { useTheme } from "@/lib/theme";
 import type {
   ChatInfo,
   MessageItem,
@@ -40,6 +41,7 @@ export function ChatApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scheduled, setScheduled] = useState<ScheduledItem[]>([]);
   const notif = useNotifications();
+  const { theme, toggle: toggleTheme } = useTheme();
   const { keywords, add: addKeyword, remove: removeKeyword } = useKeywords();
   const selectedJidRef = useRef<string | null>(null);
   const chatsRef = useRef<ChatInfo[]>([]);
@@ -48,6 +50,12 @@ export function ChatApp() {
   useEffect(() => {
     keywordsRef.current = keywords;
   }, [keywords]);
+
+  // Reflect total unread on the OS taskbar/dock via the Electron bridge.
+  useEffect(() => {
+    const total = chats.reduce((sum, c) => sum + c.unreadCount, 0);
+    window.wab?.setUnread(total);
+  }, [chats]);
 
   useEffect(() => {
     selectedJidRef.current = selectedJid;
@@ -358,6 +366,8 @@ export function ChatApp() {
           scheduled={scheduled}
           chatNameOf={(jid) => chats.find((c) => c.jid === jid)?.name ?? jid.split("@")[0]}
           onCancelScheduled={(id) => socket?.emit("cancel-scheduled", { id })}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}

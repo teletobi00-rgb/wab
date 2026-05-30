@@ -30,6 +30,28 @@
   --color-wa-link: #53bdeb;
 }
 
+/* Light theme overrides — toggled by data-theme="light" on <html>. */
+[data-theme="light"] {
+  --color-wa-green: #00a884;
+  --color-wa-green-soft: #017561;
+  --color-wa-bg: #efeae2;
+  --color-wa-bg-chat: #efeae2;
+  --color-wa-panel: #ffffff;
+  --color-wa-panel-soft: #f0f2f5;
+  --color-wa-panel-hover: #e9edef;
+  --color-wa-border: rgba(0, 0, 0, 0.1);
+  --color-wa-text: #111b21;
+  --color-wa-text-muted: #667781;
+  --color-wa-bubble-out: #d9fdd3;
+  --color-wa-bubble-in: #ffffff;
+}
+
+[data-theme="light"] .chat-bg {
+  background-color: var(--color-wa-bg-chat);
+  background-image: radial-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
 html,
 body {
   height: 100%;

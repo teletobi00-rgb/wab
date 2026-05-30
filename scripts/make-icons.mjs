@@ -36,6 +36,12 @@ await sharp(svg, { density: 384 })
   .png()
   .toFile(path.join(buildDir, "tray@2x.png"));
 
+// Small red dot used as the Windows taskbar overlay for unread messages.
+const badgeSvg = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#ef4444" stroke="#fff" stroke-width="1.5"/></svg>',
+);
+await sharp(badgeSvg).resize(16, 16).png().toFile(path.join(buildDir, "badge.png"));
+
 console.log("Icons generated:");
 console.log("  build/icon.ico  (Windows installer + app icon)");
 console.log("  build/icon.png  (256x256, cross-platform fallback)");
