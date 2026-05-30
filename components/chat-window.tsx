@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatInfo,
   MessageItem,
@@ -22,6 +22,7 @@ export function ChatWindow({
   onSendMedia,
   onReact,
   onDelete,
+  onForward,
 }: {
   chat: ChatInfo;
   messages: MessageItem[];
@@ -37,6 +38,7 @@ export function ChatWindow({
   ) => void;
   onReact: (messageId: string, emoji: string) => void;
   onDelete: (messageId: string, forEveryone: boolean) => void;
+  onForward: (messageId: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
@@ -47,7 +49,40 @@ export function ChatWindow({
   const [pendingIndex, setPendingIndex] = useState(0);
   const [pendingCaption, setPendingCaption] = useState("");
   const [lightbox, setLightbox] = useState<{ url: string; fileName?: string } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchIdx, setMatchIdx] = useState(0);
   const isDragging = dragDepth > 0;
+
+  const matchIds = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return messages
+      .filter((m) => !m.deleted && m.text.toLowerCase().includes(q))
+      .map((m) => m.id);
+  }, [messages, searchQuery]);
+  const activeMatchId = matchIds[matchIdx];
+
+  function scrollToMessage(id: string) {
+    const el = scrollRef.current?.querySelector(`[data-msgid="${CSS.escape(id)}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  // When the query changes, jump to the last (most recent) match.
+  useEffect(() => {
+    if (matchIds.length === 0) return;
+    const last = matchIds.length - 1;
+    setMatchIdx(last);
+    scrollToMessage(matchIds[last]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
+
+  function stepMatch(delta: number) {
+    if (matchIds.length === 0) return;
+    const next = (matchIdx + delta + matchIds.length) % matchIds.length;
+    setMatchIdx(next);
+    scrollToMessage(matchIds[next]);
+  }
 
   function handleScroll() {
     const el = scrollRef.current;
@@ -81,6 +116,9 @@ export function ChatWindow({
     setPending(null);
     setPendingCaption("");
     setPendingIndex(0);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setMatchIdx(0);
     // biome-ignore lint/correctness/useExhaustiveDependencies: chat change resets all interaction state
   }, [chat.jid]);
 
@@ -242,7 +280,7 @@ export function ChatWindow({
     >
       <div className="flex items-center gap-3 border-b border-wa-border bg-wa-panel-soft px-4 py-2.5">
         <Avatar name={chat.name} isGroup={chat.isGroup} size="md" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] font-medium text-wa-text">{chat.name}</div>
           <div
             className={`truncate text-xs transition-colors ${
@@ -254,7 +292,72 @@ export function ChatWindow({
             {subtitle}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setSearchOpen((o) => !o)}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-wa-panel-hover ${
+            searchOpen ? "text-wa-green" : "text-wa-text-muted hover:text-wa-text"
+          }`}
+          title="대화 내 검색"
+          aria-label="대화 내 검색"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
+            <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
+
+      {searchOpen ? (
+        <div className="flex items-center gap-2 border-b border-wa-border bg-wa-panel px-3 py-2">
+          {/* biome-ignore lint/a11y/noAutofocus: search opens for this input */}
+          <input
+            autoFocus
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") stepMatch(e.shiftKey ? 1 : -1);
+              else if (e.key === "Escape") setSearchOpen(false);
+            }}
+            placeholder="이 대화에서 검색..."
+            className="flex-1 rounded-md bg-wa-panel-soft px-3 py-1.5 text-[13px] text-wa-text outline-none placeholder:text-wa-text-muted focus:ring-1 focus:ring-wa-green/60"
+          />
+          <span className="shrink-0 text-[12px] text-wa-text-muted">
+            {searchQuery.trim() ? `${matchIds.length ? matchIdx + 1 : 0}/${matchIds.length}` : ""}
+          </span>
+          <button
+            type="button"
+            onClick={() => stepMatch(-1)}
+            disabled={matchIds.length === 0}
+            className="flex h-7 w-7 items-center justify-center rounded text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text disabled:opacity-30"
+            aria-label="이전 결과"
+            title="이전(최신)"
+          >
+            ▲
+          </button>
+          <button
+            type="button"
+            onClick={() => stepMatch(1)}
+            disabled={matchIds.length === 0}
+            className="flex h-7 w-7 items-center justify-center rounded text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text disabled:opacity-30"
+            aria-label="다음 결과"
+            title="다음(과거)"
+          >
+            ▼
+          </button>
+          <button
+            type="button"
+            onClick={() => setSearchOpen(false)}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+            aria-label="검색 닫기"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+      ) : null}
 
       <div
         ref={scrollRef}
@@ -279,6 +382,8 @@ export function ChatWindow({
                 onOpenImage={(url, fileName) => setLightbox({ url, fileName })}
                 onReact={onReact}
                 onDelete={onDelete}
+                onForward={onForward}
+                matchActive={!!searchQuery.trim() && m.id === activeMatchId}
               />
             ))}
           </div>
@@ -354,6 +459,8 @@ function MessageBubble({
   onOpenImage,
   onReact,
   onDelete,
+  onForward,
+  matchActive,
 }: {
   message: MessageItem;
   showSender: boolean;
@@ -362,6 +469,8 @@ function MessageBubble({
   onOpenImage: (url: string, fileName?: string) => void;
   onReact: (messageId: string, emoji: string) => void;
   onDelete: (messageId: string, forEveryone: boolean) => void;
+  onForward: (messageId: string) => void;
+  matchActive?: boolean;
 }) {
   const isOut = message.fromMe;
   const actions = message.deleted ? null : (
@@ -374,10 +483,12 @@ function MessageBubble({
         if (message.text) navigator.clipboard?.writeText(message.text).catch(() => {});
       }}
       onDelete={(forEveryone) => onDelete(message.id, forEveryone)}
+      onForward={() => onForward(message.id)}
     />
   );
   return (
     <div
+      data-msgid={message.id}
       className={`group flex w-full items-start gap-1.5 ${
         isOut ? "justify-end" : "justify-start"
       }`}
@@ -389,7 +500,9 @@ function MessageBubble({
         // The min() cap keeps bubbles readable even on very wide windows.
         className={`relative min-w-0 max-w-[min(75%,640px)] rounded-lg px-2.5 py-1.5 text-[14px] shadow-sm ${
           isOut ? "rounded-tr-sm bg-wa-bubble-out" : "rounded-tl-sm bg-wa-bubble-in"
-        } ${isLatest ? "bubble-in" : ""}`}
+        } ${isLatest ? "bubble-in" : ""} ${
+          matchActive ? "ring-2 ring-wa-green ring-offset-1 ring-offset-wa-bg-chat" : ""
+        }`}
       >
         {showSender && !isOut && message.pushName ? (
           <div className="mb-0.5 text-[12px] font-semibold text-wa-green">{message.pushName}</div>
@@ -423,6 +536,7 @@ function MessageActions({
   onReply,
   onCopy,
   onDelete,
+  onForward,
 }: {
   isOut: boolean;
   hasText: boolean;
@@ -430,6 +544,7 @@ function MessageActions({
   onReply: () => void;
   onCopy: () => void;
   onDelete: (forEveryone: boolean) => void;
+  onForward: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
@@ -494,6 +609,16 @@ function MessageActions({
               복사
             </button>
           ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              onForward();
+              setMenuOpen(false);
+            }}
+            className="block w-full px-3 py-1.5 text-left text-wa-text hover:bg-wa-panel-hover"
+          >
+            전달
+          </button>
           <button
             type="button"
             onClick={() => {

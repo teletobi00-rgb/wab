@@ -1199,6 +1199,16 @@ export async function initWhatsApp(io: IO) {
         console.error("deleteMessage failed", err);
       }
     },
+    forwardMessage: async (toJid: string, messageId: string) => {
+      if (!sock || status.state !== "connected") return;
+      const raw = rawMessages.get(messageId);
+      if (!raw) return;
+      try {
+        await sock.sendMessage(toJid, { forward: raw });
+      } catch (err) {
+        console.error("forwardMessage failed", err);
+      }
+    },
     sendTyping: async (jid: string, isTyping: boolean) => {
       if (!sock || status.state !== "connected") return;
       try {

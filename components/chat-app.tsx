@@ -14,6 +14,7 @@ import type {
 import { Avatar } from "./avatar";
 import { ChatList } from "./chat-list";
 import { ChatWindow } from "./chat-window";
+import { ForwardModal } from "./forward-modal";
 import { NewChatModal } from "./new-chat-modal";
 import { QrLogin } from "./qr-login";
 import { SearchBar } from "./search-bar";
@@ -32,6 +33,7 @@ export function ChatApp() {
   const [presenceByJid, setPresenceByJid] = useState<Record<string, PresenceState>>({});
   const [query, setQuery] = useState("");
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [forwardMessageId, setForwardMessageId] = useState<string | null>(null);
   const notif = useNotifications();
   const selectedJidRef = useRef<string | null>(null);
   const chatsRef = useRef<ChatInfo[]>([]);
@@ -291,6 +293,7 @@ export function ChatApp() {
             onDelete={(messageId, forEveryone) =>
               socket?.emit("delete-message", { jid: selectedChat.jid, messageId, forEveryone })
             }
+            onForward={(messageId) => setForwardMessageId(messageId)}
           />
         ) : (
           <EmptyState />
@@ -311,6 +314,17 @@ export function ChatApp() {
                 setSelectedJid(chat.jid);
               }
             });
+          }}
+        />
+      ) : null}
+      {forwardMessageId ? (
+        <ForwardModal
+          chats={chats}
+          onClose={() => setForwardMessageId(null)}
+          onPick={(toJid) => {
+            socket?.emit("forward-message", { toJid, messageId: forwardMessageId });
+            setForwardMessageId(null);
+            setSelectedJid(toJid);
           }}
         />
       ) : null}

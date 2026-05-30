@@ -152,6 +152,14 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
       }
     });
 
+    socket.on("forward-message", async ({ toJid, messageId }) => {
+      try {
+        await wa?.forwardMessage(toJid, messageId);
+      } catch (err) {
+        console.error("forward-message failed", err);
+      }
+    });
+
     socket.on("typing", async ({ jid, isTyping }) => {
       try {
         await wa?.sendTyping(jid, isTyping);

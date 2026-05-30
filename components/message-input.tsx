@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTemplates } from "@/lib/templates";
 import type { MessageItem } from "@/lib/whatsapp/types";
+import { EmojiPicker } from "./emoji-picker";
 
 export function MessageInput({
   onSend,
@@ -17,9 +19,17 @@ export function MessageInput({
   onCancelReply: () => void;
 }) {
   const [text, setText] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const { templates, add: addTemplate, remove: removeTemplate } = useTemplates();
   const isTypingRef = useRef(false);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function insertText(s: string) {
+    setText((t) => t + s);
+    setTyping(true);
+  }
 
   function setTyping(next: boolean) {
     if (isTypingRef.current === next) return;
@@ -63,8 +73,25 @@ export function MessageInput({
   }
 
   return (
-    <div className="border-t border-wa-border bg-wa-panel-soft">
+    <div className="relative border-t border-wa-border bg-wa-panel-soft">
       {replyTo ? <ReplyPreview message={replyTo} onCancel={onCancelReply} /> : null}
+      {emojiOpen ? (
+        <EmojiPicker onPick={insertText} onClose={() => setEmojiOpen(false)} />
+      ) : null}
+      {templateOpen ? (
+        <TemplatePopup
+          templates={templates}
+          canAdd={!!text.trim()}
+          onPick={(t) => {
+            setText(t);
+            setTyping(true);
+            setTemplateOpen(false);
+          }}
+          onAdd={() => addTemplate(text)}
+          onRemove={removeTemplate}
+          onClose={() => setTemplateOpen(false)}
+        />
+      ) : null}
       <div className="flex items-center gap-2 px-3 py-2.5">
         <input
           ref={fileInputRef}
@@ -89,6 +116,30 @@ export function MessageInput({
               strokeLinejoin="round"
             />
           </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setEmojiOpen((o) => !o);
+            setTemplateOpen(false);
+          }}
+          className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-lg transition-colors hover:bg-wa-panel-hover"
+          title="이모지"
+          aria-label="이모지"
+        >
+          😀
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTemplateOpen((o) => !o);
+            setEmojiOpen(false);
+          }}
+          className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-base transition-colors hover:bg-wa-panel-hover"
+          title="빠른 답장"
+          aria-label="빠른 답장"
+        >
+          ⚡
         </button>
         <input
           type="text"
@@ -122,6 +173,99 @@ export function MessageInput({
             />
           </svg>
         </button>
+      </div>
+    </div>
+  );
+}
+
+function TemplatePopup({
+  templates,
+  canAdd,
+  onPick,
+  onAdd,
+  onRemove,
+  onClose,
+}: {
+  templates: string[];
+  canAdd: boolean;
+  onPick: (text: string) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const t = setTimeout(() => document.addEventListener("mousedown", onDocClick), 0);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-12 left-2 z-30 w-80 overflow-hidden rounded-xl border border-wa-border bg-wa-panel-soft shadow-2xl"
+    >
+      <div className="flex items-center justify-between border-b border-wa-border px-3 py-2">
+        <span className="text-[12px] font-semibold text-wa-text">빠른 답장</span>
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={!canAdd}
+          className="text-[12px] text-wa-green disabled:cursor-not-allowed disabled:opacity-40"
+          title="현재 입력창 내용을 템플릿으로 저장"
+        >
+          + 현재 입력 저장
+        </button>
+      </div>
+      <div className="max-h-56 overflow-y-auto py-1">
+        {templates.length === 0 ? (
+          <div className="px-3 py-6 text-center text-[12px] text-wa-text-muted">
+            저장된 빠른 답장이 없어요.
+            <br />
+            입력창에 문구를 쓰고 “현재 입력 저장”을 눌러보세요.
+          </div>
+        ) : (
+          templates.map((t, i) => (
+            <div
+              key={`${t}-${i}`}
+              className="group flex items-center gap-1 px-2 hover:bg-wa-panel-hover"
+            >
+              <button
+                type="button"
+                onClick={() => onPick(t)}
+                className="min-w-0 flex-1 truncate py-1.5 text-left text-[13px] text-wa-text"
+              >
+                {t}
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemove(i)}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-wa-text-muted opacity-0 transition-opacity hover:bg-wa-panel hover:text-rose-400 group-hover:opacity-100"
+                aria-label="삭제"
+                title="삭제"
+              >
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path
+                    d="m3 3 6 6M9 3l-6 6"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
