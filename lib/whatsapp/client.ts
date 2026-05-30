@@ -253,6 +253,16 @@ export async function initWhatsApp(io: IO) {
   // echo broadcast can carry the tempId back and the UI replaces the exact
   // placeholder (instead of fuzzy text+timestamp matching).
   const pendingTempIds = new Map<string, string>();
+  // Scheduled (future-send) messages, in memory while the app runs.
+  type ScheduledEntry = {
+    id: string;
+    jid: string;
+    text: string;
+    sendAt: number;
+    timer: ReturnType<typeof setTimeout>;
+  };
+  const scheduled = new Map<string, ScheduledEntry>();
+  let scheduleCounter = 0;
   // Maps @lid JIDs to their canonical @s.whatsapp.net counterpart so all
   // messages for a contact end up under the same chat regardless of which
   // JID form WhatsApp uses on a given event.
@@ -770,6 +780,44 @@ export async function initWhatsApp(io: IO) {
     io.emit("message-upsert", { jid, message: merged });
   }
 
+  function listScheduled() {
+    return Array.from(scheduled.values())
+      .map(({ timer, ...s }) => s)
+      .sort((a, b) => a.sendAt - b.sendAt);
+  }
+
+  function emitScheduled() {
+    io.emit("scheduled", listScheduled());
+  }
+
+  function scheduleMessage(jid: string, text: string, sendAt: number) {
+    const id = `sched_${sendAt}_${scheduleCounter++}`;
+    // setTimeout caps at ~24.8 days (2^31 ms); clamp so we don't fire instantly.
+    const delay = Math.min(Math.max(0, sendAt - Date.now()), 2 ** 31 - 1);
+    const timer = setTimeout(async () => {
+      scheduled.delete(id);
+      try {
+        if (sock && status.state === "connected") {
+          const sent = await sock.sendMessage(jid, { text });
+          if (sent?.key?.id) rawMessages.set(sent.key.id, sent);
+        }
+      } catch (err) {
+        console.error("scheduled send failed", err);
+      }
+      emitScheduled();
+    }, delay);
+    scheduled.set(id, { id, jid, text, sendAt, timer });
+    emitScheduled();
+  }
+
+  function cancelScheduled(id: string) {
+    const s = scheduled.get(id);
+    if (!s) return;
+    clearTimeout(s.timer);
+    scheduled.delete(id);
+    emitScheduled();
+  }
+
   async function markReadInternal(jid: string) {
     if (!sock || status.state !== "connected") return;
     const list = messages.get(jid);
@@ -1209,6 +1257,10 @@ export async function initWhatsApp(io: IO) {
         console.error("forwardMessage failed", err);
       }
     },
+    getScheduled: () => listScheduled(),
+    scheduleMessage: (jid: string, text: string, sendAt: number) =>
+      scheduleMessage(jid, text, sendAt),
+    cancelScheduled: (id: string) => cancelScheduled(id),
     sendTyping: async (jid: string, isTyping: boolean) => {
       if (!sock || status.state !== "connected") return;
       try {
@@ -1248,6 +1300,9 @@ export async function initWhatsApp(io: IO) {
       mediaTotalBytes = 0;
       lidToPhone.clear();
       pendingTempIds.clear();
+      for (const s of scheduled.values()) clearTimeout(s.timer);
+      scheduled.clear();
+      emitScheduled();
       await fs.rm(AUTH_DIR, { recursive: true, force: true });
       await fs.rm(MEDIA_DIR, { recursive: true, force: true });
       await fs.mkdir(AUTH_DIR, { recursive: true });

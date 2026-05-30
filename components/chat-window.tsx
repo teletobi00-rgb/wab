@@ -23,6 +23,7 @@ export function ChatWindow({
   onReact,
   onDelete,
   onForward,
+  onScheduleMessage,
 }: {
   chat: ChatInfo;
   messages: MessageItem[];
@@ -39,6 +40,7 @@ export function ChatWindow({
   onReact: (messageId: string, emoji: string) => void;
   onDelete: (messageId: string, forEveryone: boolean) => void;
   onForward: (messageId: string) => void;
+  onScheduleMessage: (text: string, sendAt: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
@@ -82,6 +84,26 @@ export function ChatWindow({
     const next = (matchIdx + delta + matchIds.length) % matchIds.length;
     setMatchIdx(next);
     scrollToMessage(matchIds[next]);
+  }
+
+  function exportChat() {
+    const lines = messages.map((m) => {
+      const t = new Date(m.timestamp * 1000).toLocaleString("ko-KR");
+      const who = m.fromMe ? "나" : (m.pushName ?? chat.name);
+      const body = m.deleted ? "(삭제된 메시지)" : m.text || `[${m.type}]`;
+      return `[${t}] ${who}: ${body}`;
+    });
+    const header = `# ${chat.name} — 내보낸 시각 ${new Date().toLocaleString("ko-KR")}\n\n`;
+    const blob = new Blob([header + lines.join("\n")], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeName = chat.name.replace(/[\\/:*?"<>|]/g, "_");
+    a.download = `${safeName}_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function handleScroll() {
@@ -306,6 +328,23 @@ export function ChatWindow({
             <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
         </button>
+        <button
+          type="button"
+          onClick={exportChat}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
+          title="대화 내보내기 (.txt)"
+          aria-label="대화 내보내기"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
       </div>
 
       {searchOpen ? (
@@ -396,6 +435,7 @@ export function ChatWindow({
         onFilesSelected={(files) => {
           queueFilesForPreview(files);
         }}
+        onSchedule={onScheduleMessage}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
       />

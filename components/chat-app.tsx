@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { matchKeyword, useKeywords } from "@/lib/keywords";
 import { useNotifications } from "@/lib/notifications";
 import { useSocket } from "@/lib/socket/client";
 import type {
@@ -9,6 +10,7 @@ import type {
   MessageStatusUpdate,
   PresenceState,
   PresenceUpdate,
+  ScheduledItem,
   Status,
 } from "@/lib/whatsapp/types";
 import { Avatar } from "./avatar";
@@ -18,6 +20,7 @@ import { ForwardModal } from "./forward-modal";
 import { NewChatModal } from "./new-chat-modal";
 import { QrLogin } from "./qr-login";
 import { SearchBar } from "./search-bar";
+import { SettingsModal } from "./settings-modal";
 
 // Mirror the server's per-chat history cap so a long-lived client session
 // doesn't accumulate unbounded message arrays in memory.
@@ -34,9 +37,17 @@ export function ChatApp() {
   const [query, setQuery] = useState("");
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [forwardMessageId, setForwardMessageId] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scheduled, setScheduled] = useState<ScheduledItem[]>([]);
   const notif = useNotifications();
+  const { keywords, add: addKeyword, remove: removeKeyword } = useKeywords();
   const selectedJidRef = useRef<string | null>(null);
   const chatsRef = useRef<ChatInfo[]>([]);
+  const keywordsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    keywordsRef.current = keywords;
+  }, [keywords]);
 
   useEffect(() => {
     selectedJidRef.current = selectedJid;
@@ -114,6 +125,7 @@ export function ChatApp() {
       });
 
       if (message.fromMe) return;
+      const matched = matchKeyword(message.text, keywordsRef.current);
       const isCurrent = selectedJidRef.current === jid;
       const isVisible =
         typeof document !== "undefined" && document.visibilityState === "visible";
@@ -127,13 +139,16 @@ export function ChatApp() {
         setChats((prev) =>
           prev.map((c) => (c.jid === jid && c.unreadCount > 0 ? { ...c, unreadCount: 0 } : c)),
         );
-        return;
+        // A keyword hit still notifies even while the chat is focused.
+        if (!matched) return;
       }
 
       const chat = chatsRef.current.find((c) => c.jid === jid);
-      const title = chat?.name ?? message.pushName ?? "새 메시지";
+      const baseTitle = chat?.name ?? message.pushName ?? "새 메시지";
+      const title = matched ? `🔔 ${baseTitle}` : baseTitle;
       const sender = chat?.isGroup && message.pushName ? `${message.pushName}: ` : "";
-      const body = sender + (message.text || messagePreview(message));
+      const body =
+        (matched ? `[${matched}] ` : "") + sender + (message.text || messagePreview(message));
       notif.notify(title, body, () => setSelectedJid(jid));
     };
     const onMessageStatus = ({ id, jid, status }: MessageStatusUpdate) => {
@@ -150,6 +165,7 @@ export function ChatApp() {
     const onPresence = ({ jid, state }: PresenceUpdate) => {
       setPresenceByJid((prev) => ({ ...prev, [jid]: state }));
     };
+    const onScheduled = (items: ScheduledItem[]) => setScheduled(items);
 
     socket.on("status", onStatus);
     socket.on("qr", onQr);
@@ -158,6 +174,7 @@ export function ChatApp() {
     socket.on("message-upsert", onMessageUpsert);
     socket.on("message-status", onMessageStatus);
     socket.on("presence", onPresence);
+    socket.on("scheduled", onScheduled);
 
     return () => {
       socket.off("status", onStatus);
@@ -167,6 +184,7 @@ export function ChatApp() {
       socket.off("message-upsert", onMessageUpsert);
       socket.off("message-status", onMessageStatus);
       socket.off("presence", onPresence);
+      socket.off("scheduled", onScheduled);
     };
   }, [socket, notif.notify]);
 
@@ -208,6 +226,7 @@ export function ChatApp() {
           notifEnabled={notif.enabled}
           onToggleNotif={notif.toggle}
           onNewChat={() => setNewChatOpen(true)}
+          onSettings={() => setSettingsOpen(true)}
           onLogout={() => {
             if (confirm("정말 로그아웃 하시겠습니까? 세션이 삭제됩니다.")) {
               socket?.emit("logout");
@@ -294,6 +313,9 @@ export function ChatApp() {
               socket?.emit("delete-message", { jid: selectedChat.jid, messageId, forEveryone })
             }
             onForward={(messageId) => setForwardMessageId(messageId)}
+            onScheduleMessage={(text, sendAt) =>
+              socket?.emit("schedule-message", { jid: selectedChat.jid, text, sendAt })
+            }
           />
         ) : (
           <EmptyState />
@@ -326,6 +348,17 @@ export function ChatApp() {
             setForwardMessageId(null);
             setSelectedJid(toJid);
           }}
+        />
+      ) : null}
+      {settingsOpen ? (
+        <SettingsModal
+          keywords={keywords}
+          onAddKeyword={addKeyword}
+          onRemoveKeyword={removeKeyword}
+          scheduled={scheduled}
+          chatNameOf={(jid) => chats.find((c) => c.jid === jid)?.name ?? jid.split("@")[0]}
+          onCancelScheduled={(id) => socket?.emit("cancel-scheduled", { id })}
+          onClose={() => setSettingsOpen(false)}
         />
       ) : null}
     </div>
@@ -388,12 +421,14 @@ function Header({
   notifEnabled,
   onToggleNotif,
   onNewChat,
+  onSettings,
   onLogout,
 }: {
   me: string;
   notifEnabled: boolean;
   onToggleNotif: () => void;
   onNewChat: () => void;
+  onSettings: () => void;
   onLogout: () => void;
 }) {
   return (
@@ -441,6 +476,23 @@ function Header({
           }`}
         >
           {notifEnabled ? <BellFilled /> : <BellOutline />}
+        </button>
+        <button
+          type="button"
+          onClick={onSettings}
+          title="설정"
+          aria-label="설정"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+            <path
+              d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M18.4 18.4l-2.1-2.1M7.7 7.7 5.6 5.6"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
         <button
           type="button"

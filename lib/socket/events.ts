@@ -5,6 +5,7 @@ import type {
   MessageItem,
   MessageStatusUpdate,
   PresenceUpdate,
+  ScheduledItem,
   Status,
 } from "../whatsapp/types";
 
@@ -28,6 +29,7 @@ export type ServerToClientEvents = {
   "message-upsert": (data: { jid: string; message: MessageItem; tempId?: string }) => void;
   "message-status": (update: MessageStatusUpdate) => void;
   presence: (presence: PresenceUpdate) => void;
+  scheduled: (items: ScheduledItem[]) => void;
 };
 
 export type ClientToServerEvents = {
@@ -45,6 +47,8 @@ export type ClientToServerEvents = {
   "send-reaction": (data: { jid: string; messageId: string; emoji: string }) => void;
   "delete-message": (data: { jid: string; messageId: string; forEveryone: boolean }) => void;
   "forward-message": (data: { toJid: string; messageId: string }) => void;
+  "schedule-message": (data: { jid: string; text: string; sendAt: number }) => void;
+  "cancel-scheduled": (data: { id: string }) => void;
   typing: (data: { jid: string; isTyping: boolean }) => void;
   "subscribe-presence": (data: { jid: string }) => void;
   "list-contacts": (ack: (contacts: ContactItem[]) => void) => void;

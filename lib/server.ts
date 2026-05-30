@@ -80,6 +80,7 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     const qr = wa.getQr();
     if (qr) socket.emit("qr", { qr });
     socket.emit("chats", wa.getChats());
+    socket.emit("scheduled", wa.getScheduled());
 
     socket.on("send-message", async ({ jid, text, replyToId, tempId }, ack) => {
       try {
@@ -157,6 +158,22 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
         await wa?.forwardMessage(toJid, messageId);
       } catch (err) {
         console.error("forward-message failed", err);
+      }
+    });
+
+    socket.on("schedule-message", ({ jid, text, sendAt }) => {
+      try {
+        wa?.scheduleMessage(jid, text, sendAt);
+      } catch (err) {
+        console.error("schedule-message failed", err);
+      }
+    });
+
+    socket.on("cancel-scheduled", ({ id }) => {
+      try {
+        wa?.cancelScheduled(id);
+      } catch (err) {
+        console.error("cancel-scheduled failed", err);
       }
     });
 

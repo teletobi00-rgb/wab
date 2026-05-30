@@ -9,18 +9,21 @@ export function MessageInput({
   onSend,
   onTyping,
   onFilesSelected,
+  onSchedule,
   replyTo,
   onCancelReply,
 }: {
   onSend: (text: string) => void;
   onTyping: (isTyping: boolean) => void;
   onFilesSelected: (files: File[]) => void;
+  onSchedule: (text: string, sendAt: number) => void;
   replyTo: MessageItem | null;
   onCancelReply: () => void;
 }) {
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const { templates, add: addTemplate, remove: removeTemplate } = useTemplates();
   const isTypingRef = useRef(false);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,6 +95,18 @@ export function MessageInput({
           onClose={() => setTemplateOpen(false)}
         />
       ) : null}
+      {scheduleOpen ? (
+        <SchedulePopup
+          onConfirm={(sendAt) => {
+            const t = text.trim();
+            if (t) onSchedule(t, sendAt);
+            setText("");
+            setTyping(false);
+            setScheduleOpen(false);
+          }}
+          onClose={() => setScheduleOpen(false)}
+        />
+      ) : null}
       <div className="flex items-center gap-2 px-3 py-2.5">
         <input
           ref={fileInputRef}
@@ -141,6 +156,16 @@ export function MessageInput({
         >
           ⚡
         </button>
+        <button
+          type="button"
+          onClick={() => setScheduleOpen(true)}
+          disabled={!text.trim()}
+          className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full text-base transition-colors hover:bg-wa-panel-hover disabled:opacity-30"
+          title="예약 전송"
+          aria-label="예약 전송"
+        >
+          🕐
+        </button>
         <input
           type="text"
           value={text}
@@ -174,6 +199,68 @@ export function MessageInput({
           </svg>
         </button>
       </div>
+    </div>
+  );
+}
+
+function SchedulePopup({
+  onConfirm,
+  onClose,
+}: {
+  onConfirm: (sendAt: number) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [value, setValue] = useState(() => {
+    const d = new Date(Date.now() + 60 * 60 * 1000); // default +1h
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+      d.getHours(),
+    )}:${pad(d.getMinutes())}`;
+  });
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const t = setTimeout(() => document.addEventListener("mousedown", onDocClick), 0);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const sendAt = new Date(value).getTime();
+  const valid = Number.isFinite(sendAt) && sendAt > Date.now();
+
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-12 left-2 z-30 w-72 rounded-xl border border-wa-border bg-wa-panel-soft p-3 shadow-2xl"
+    >
+      <div className="mb-2 text-[12px] font-semibold text-wa-text">예약 전송 시각</div>
+      <input
+        type="datetime-local"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-full rounded-md bg-wa-panel px-2 py-1.5 text-[13px] text-wa-text outline-none focus:ring-1 focus:ring-wa-green/60 [color-scheme:dark]"
+      />
+      <button
+        type="button"
+        onClick={() => onConfirm(sendAt)}
+        disabled={!valid}
+        className="mt-2 w-full rounded-md bg-wa-green py-1.5 text-[13px] font-medium text-white hover:bg-wa-green-soft disabled:opacity-40"
+      >
+        {valid ? "예약" : "미래 시각을 선택하세요"}
+      </button>
+      <p className="mt-2 text-[10px] text-wa-text-muted">
+        앱이 실행 중일 때만 예약 시각에 전송됩니다.
+      </p>
     </div>
   );
 }

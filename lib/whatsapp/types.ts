@@ -94,6 +94,13 @@ export type ContactItem = {
   isGroup: boolean;
 };
 
+export type ScheduledItem = {
+  id: string;
+  jid: string;
+  text: string;
+  sendAt: number;
+};
+
 export type CheckNumberResult = {
   exists: boolean;
   jid?: string;
