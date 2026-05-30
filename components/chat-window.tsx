@@ -35,6 +35,8 @@ export function ChatWindow({
   ) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const lastJidRef = useRef(chat.jid);
   const [dragDepth, setDragDepth] = useState(0);
   const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
   const [pending, setPending] = useState<PendingMedia[] | null>(null);
@@ -43,9 +45,26 @@ export function ChatWindow({
   const [lightbox, setLightbox] = useState<{ url: string; fileName?: string } | null>(null);
   const isDragging = dragDepth > 0;
 
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (!el) return;
+    const jidChanged = lastJidRef.current !== chat.jid;
+    lastJidRef.current = chat.jid;
+    if (jidChanged) {
+      // Opening a chat: jump to the latest instantly.
+      nearBottomRef.current = true;
+      el.scrollTo({ top: el.scrollHeight });
+    } else if (nearBottomRef.current) {
+      // Only auto-scroll on new messages if the user was already at the bottom —
+      // don't yank them down while they're reading older messages.
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, [messages.length, chat.jid]);
 
   useEffect(() => {
@@ -142,6 +161,9 @@ export function ChatWindow({
   }
 
   function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    // Mirror the enter guard so the depth counter stays balanced and the drop
+    // overlay can't get stuck open.
+    if (!e.dataTransfer.types.includes("Files")) return;
     e.preventDefault();
     setDragDepth((d) => Math.max(0, d - 1));
   }
@@ -165,6 +187,17 @@ export function ChatWindow({
   queueRef.current = queueFilesForPreview;
   const pendingRef = useRef(pending);
   pendingRef.current = pending;
+
+  // Revoke any staged preview object URLs when the window unmounts (e.g. the
+  // chat closes on disconnect/logout while a media preview is open) — the
+  // per-event revoke paths don't cover unmount.
+  useEffect(() => {
+    return () => {
+      for (const p of pendingRef.current ?? []) {
+        if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     async function handlePaste(e: ClipboardEvent) {
@@ -219,7 +252,11 @@ export function ChatWindow({
         </div>
       </div>
 
-      <div ref={scrollRef} className="chat-bg flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="chat-bg flex-1 overflow-y-auto px-4 py-4"
+      >
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <p className="rounded-full bg-wa-panel-soft/60 px-4 py-1.5 text-xs text-wa-text-muted">

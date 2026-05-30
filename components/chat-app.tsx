@@ -60,9 +60,18 @@ export function ChatApp() {
     const onQr = ({ qr }: { qr: string }) => setQr(qr);
     const onChats = (cs: ChatInfo[]) => setChats(sortChats(cs));
     const onChatUpdate = (c: ChatInfo) => {
+      // Keep the badge at 0 for the chat the user is actively viewing — we
+      // mark-read on every incoming message there, so an interim chat-update
+      // carrying unreadCount=1 would otherwise make it flash.
+      const isFocusedChat =
+        selectedJidRef.current === c.jid &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible" &&
+        document.hasFocus();
+      const cc = isFocusedChat && c.unreadCount > 0 ? { ...c, unreadCount: 0 } : c;
       setChats((prev) => {
-        const i = prev.findIndex((x) => x.jid === c.jid);
-        const next = i >= 0 ? [...prev.slice(0, i), c, ...prev.slice(i + 1)] : [c, ...prev];
+        const i = prev.findIndex((x) => x.jid === cc.jid);
+        const next = i >= 0 ? [...prev.slice(0, i), cc, ...prev.slice(i + 1)] : [cc, ...prev];
         return sortChats(next);
       });
     };
@@ -109,9 +118,13 @@ export function ChatApp() {
       const hasFocus = typeof document !== "undefined" && document.hasFocus();
       const inFocus = isCurrent && isVisible && hasFocus;
 
-      // Auto mark-read when the message arrives in the chat the user is on.
+      // Auto mark-read when the message arrives in the chat the user is on,
+      // and optimistically clear the badge so it doesn't flash 1→0.
       if (inFocus) {
         socket.emit("mark-read", { jid });
+        setChats((prev) =>
+          prev.map((c) => (c.jid === jid && c.unreadCount > 0 ? { ...c, unreadCount: 0 } : c)),
+        );
         return;
       }
 
@@ -158,7 +171,20 @@ export function ChatApp() {
   useEffect(() => {
     if (!socket || !selectedJid) return;
     socket.emit("load-messages", { jid: selectedJid, limit: 100 }, (msgs) => {
-      setMessagesByJid((prev) => ({ ...prev, [selectedJid]: msgs }));
+      // Merge, don't replace: a live message-upsert can land between the server
+      // computing this snapshot and the ack arriving. Dedupe by id (server copy
+      // wins) and keep any optimistic/local placeholders not yet echoed.
+      setMessagesByJid((prev) => {
+        const existing = prev[selectedJid] ?? [];
+        const byId = new Map<string, MessageItem>();
+        for (const m of msgs) byId.set(m.id, m);
+        for (const m of existing) if (!byId.has(m.id)) byId.set(m.id, m);
+        const merged = Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp);
+        if (merged.length > MESSAGES_PER_CHAT_CAP) {
+          merged.splice(0, merged.length - MESSAGES_PER_CHAT_CAP);
+        }
+        return { ...prev, [selectedJid]: merged };
+      });
     });
     socket.emit("subscribe-presence", { jid: selectedJid });
     socket.emit("mark-read", { jid: selectedJid });
