@@ -128,6 +128,30 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
       }
     });
 
+    socket.on("mark-all-read", async () => {
+      try {
+        await wa?.markAllRead();
+      } catch (err) {
+        console.error("mark-all-read failed", err);
+      }
+    });
+
+    socket.on("send-reaction", async ({ jid, messageId, emoji }) => {
+      try {
+        await wa?.sendReaction(jid, messageId, emoji);
+      } catch (err) {
+        console.error("send-reaction failed", err);
+      }
+    });
+
+    socket.on("delete-message", async ({ jid, messageId, forEveryone }) => {
+      try {
+        await wa?.deleteMessage(jid, messageId, forEveryone);
+      } catch (err) {
+        console.error("delete-message failed", err);
+      }
+    });
+
     socket.on("typing", async ({ jid, isTyping }) => {
       try {
         await wa?.sendTyping(jid, isTyping);

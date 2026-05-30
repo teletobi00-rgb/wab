@@ -41,6 +41,9 @@ export type ClientToServerEvents = {
     ack: (msgs: MessageItem[]) => void,
   ) => void;
   "mark-read": (data: { jid: string }) => void;
+  "mark-all-read": () => void;
+  "send-reaction": (data: { jid: string; messageId: string; emoji: string }) => void;
+  "delete-message": (data: { jid: string; messageId: string; forEveryone: boolean }) => void;
   typing: (data: { jid: string; isTyping: boolean }) => void;
   "subscribe-presence": (data: { jid: string }) => void;
   "list-contacts": (ack: (contacts: ContactItem[]) => void) => void;

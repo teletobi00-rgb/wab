@@ -20,6 +20,8 @@ export function ChatWindow({
   onSend,
   onTyping,
   onSendMedia,
+  onReact,
+  onDelete,
 }: {
   chat: ChatInfo;
   messages: MessageItem[];
@@ -33,6 +35,8 @@ export function ChatWindow({
     caption?: string,
     replyToId?: string,
   ) => void;
+  onReact: (messageId: string, emoji: string) => void;
+  onDelete: (messageId: string, forEveryone: boolean) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
@@ -273,6 +277,8 @@ export function ChatWindow({
                 isLatest={i === messages.length - 1}
                 onReply={() => setReplyTo(m)}
                 onOpenImage={(url, fileName) => setLightbox({ url, fileName })}
+                onReact={onReact}
+                onDelete={onDelete}
               />
             ))}
           </div>
@@ -346,21 +352,37 @@ function MessageBubble({
   isLatest,
   onReply,
   onOpenImage,
+  onReact,
+  onDelete,
 }: {
   message: MessageItem;
   showSender: boolean;
   isLatest: boolean;
   onReply: () => void;
   onOpenImage: (url: string, fileName?: string) => void;
+  onReact: (messageId: string, emoji: string) => void;
+  onDelete: (messageId: string, forEveryone: boolean) => void;
 }) {
   const isOut = message.fromMe;
+  const actions = message.deleted ? null : (
+    <MessageActions
+      isOut={isOut}
+      hasText={!!message.text}
+      onReact={(emoji) => onReact(message.id, emoji)}
+      onReply={onReply}
+      onCopy={() => {
+        if (message.text) navigator.clipboard?.writeText(message.text).catch(() => {});
+      }}
+      onDelete={(forEveryone) => onDelete(message.id, forEveryone)}
+    />
+  );
   return (
     <div
       className={`group flex w-full items-start gap-1.5 ${
         isOut ? "justify-end" : "justify-start"
       }`}
     >
-      {isOut ? <ReplyHandle onReply={onReply} side="out" /> : null}
+      {isOut ? actions : null}
       <div
         // min-w-0 lets the bubble actually shrink below its content's intrinsic
         // width inside the flex row, so max-w-[...] is respected for long text.
@@ -374,6 +396,9 @@ function MessageBubble({
         ) : null}
         {message.quoted ? <QuotedPreview quoted={message.quoted} /> : null}
         <MessageContent message={message} onOpenImage={onOpenImage} />
+        {message.reactions && message.reactions.length > 0 ? (
+          <ReactionChips reactions={message.reactions} />
+        ) : null}
         <div className="-mb-0.5 mt-1 flex items-center justify-end gap-1 text-[10.5px] text-wa-text-muted">
           <span>
             {new Date(message.timestamp * 1000).toLocaleTimeString("ko-KR", {
@@ -384,32 +409,134 @@ function MessageBubble({
           {isOut && message.status ? <StatusIcon status={message.status} /> : null}
         </div>
       </div>
-      {!isOut ? <ReplyHandle onReply={onReply} side="in" /> : null}
+      {!isOut ? actions : null}
     </div>
   );
 }
 
-function ReplyHandle({ onReply, side }: { onReply: () => void; side: "in" | "out" }) {
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "🙏"];
+
+function MessageActions({
+  isOut,
+  hasText,
+  onReact,
+  onReply,
+  onCopy,
+  onDelete,
+}: {
+  isOut: boolean;
+  hasText: boolean;
+  onReact: (emoji: string) => void;
+  onReply: () => void;
+  onCopy: () => void;
+  onDelete: (forEveryone: boolean) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menuOpen]);
   return (
-    <button
-      type="button"
-      onClick={onReply}
-      className={`mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-wa-panel-soft text-wa-text-muted opacity-0 shadow-sm transition-opacity duration-150 hover:bg-wa-panel-hover hover:text-wa-text group-hover:opacity-100 ${
-        side === "out" ? "" : ""
-      }`}
-      title="답장"
-      aria-label="답장"
-    >
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path
-          d="M9 3 4 7l5 4M4 7h6a3 3 0 0 1 3 3v2"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </button>
+    <div className="relative mt-1 flex shrink-0 items-center gap-0.5 self-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+      {QUICK_REACTIONS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          onClick={() => onReact(emoji)}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[15px] transition-transform hover:scale-125"
+          title={`${emoji} 반응`}
+        >
+          {emoji}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onReply}
+        className="flex h-7 w-7 items-center justify-center rounded-full text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+        title="답장"
+        aria-label="답장"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M9 3 4 7l5 4M4 7h6a3 3 0 0 1 3 3v2"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenuOpen((o) => !o);
+        }}
+        className="flex h-7 w-7 items-center justify-center rounded-full text-lg leading-none text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+        title="더보기"
+        aria-label="더보기"
+      >
+        ⋯
+      </button>
+      {menuOpen ? (
+        <div className="absolute right-0 top-8 z-20 w-36 overflow-hidden rounded-md border border-wa-border bg-wa-panel-soft py-1 text-[13px] shadow-xl">
+          {hasText ? (
+            <button
+              type="button"
+              onClick={() => {
+                onCopy();
+                setMenuOpen(false);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-wa-text hover:bg-wa-panel-hover"
+            >
+              복사
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              onDelete(false);
+              setMenuOpen(false);
+            }}
+            className="block w-full px-3 py-1.5 text-left text-wa-text hover:bg-wa-panel-hover"
+          >
+            나에게서 삭제
+          </button>
+          {isOut ? (
+            <button
+              type="button"
+              onClick={() => {
+                onDelete(true);
+                setMenuOpen(false);
+              }}
+              className="block w-full px-3 py-1.5 text-left text-rose-400 hover:bg-wa-panel-hover"
+            >
+              모두에게서 삭제
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReactionChips({ reactions }: { reactions: NonNullable<MessageItem["reactions"]> }) {
+  const counts = new Map<string, number>();
+  for (const r of reactions) counts.set(r.emoji, (counts.get(r.emoji) ?? 0) + 1);
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {Array.from(counts.entries()).map(([emoji, n]) => (
+        <span
+          key={emoji}
+          className="inline-flex items-center gap-0.5 rounded-full bg-black/25 px-1.5 py-0.5 text-[11px] leading-none"
+        >
+          <span>{emoji}</span>
+          {n > 1 ? <span className="text-wa-text-muted">{n}</span> : null}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -460,6 +587,9 @@ function MessageContent({
   message: MessageItem;
   onOpenImage: (url: string, fileName?: string) => void;
 }) {
+  if (message.deleted) {
+    return <div className="italic text-wa-text-muted">🚫 삭제된 메시지입니다</div>;
+  }
   if (message.type === "text" && message.text) {
     return (
       <div className="whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">

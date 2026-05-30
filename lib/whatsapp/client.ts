@@ -732,6 +732,70 @@ export async function initWhatsApp(io: IO) {
     }, delayMs);
   }
 
+  // Apply a reaction (or its removal when emoji is "") to a stored message and
+  // re-emit it. One reaction per sender (keyed by sender jid).
+  function applyReaction(
+    jid: string,
+    targetId: string,
+    emoji: string,
+    fromMe: boolean,
+    sender: string | undefined,
+  ) {
+    const list = messages.get(jid);
+    if (!list) return;
+    const idx = list.findIndex((m) => m.id === targetId);
+    if (idx < 0) return;
+    const prev = list[idx].reactions ?? [];
+    const reactions = prev.filter((r) => (r.sender ?? "") !== (sender ?? ""));
+    if (emoji) reactions.push({ emoji, fromMe, sender });
+    const merged = { ...list[idx], reactions };
+    list[idx] = merged;
+    io.emit("message-upsert", { jid, message: merged });
+  }
+
+  // Mark a stored message as deleted (revoked) and re-emit it.
+  function markDeleted(jid: string, targetId: string) {
+    const list = messages.get(jid);
+    if (!list) return;
+    const idx = list.findIndex((m) => m.id === targetId);
+    if (idx < 0) return;
+    const merged: MessageItem = {
+      ...list[idx],
+      deleted: true,
+      text: "",
+      media: undefined,
+      reactions: [],
+    };
+    list[idx] = merged;
+    io.emit("message-upsert", { jid, message: merged });
+  }
+
+  async function markReadInternal(jid: string) {
+    if (!sock || status.state !== "connected") return;
+    const list = messages.get(jid);
+    if (!list || list.length === 0) return;
+    const unread = list.filter((m) => !m.fromMe && m.status !== "read");
+    if (unread.length === 0) return;
+    try {
+      await sock.readMessages(
+        unread.map((m) => ({
+          id: m.id,
+          remoteJid: jid,
+          participant: m.participantJid,
+          fromMe: false,
+        })),
+      );
+      const chat = chats.get(jid);
+      if (chat && chat.unreadCount > 0) {
+        const updated: ChatInfo = { ...chat, unreadCount: 0 };
+        chats.set(jid, updated);
+        io.emit("chat-update", updated);
+      }
+    } catch (err) {
+      console.error("markRead failed", err);
+    }
+  }
+
   async function start() {
     if (restarting) return;
     restarting = true;
@@ -905,6 +969,13 @@ export async function initWhatsApp(io: IO) {
 
       sock.ev.on("messages.upsert", ({ messages: msgs, type }) => {
         for (const m of msgs) {
+          // Incoming delete (revoke): mark the target message as deleted rather
+          // than rendering the protocol envelope. type 0 === REVOKE.
+          const proto = m.message?.protocolMessage;
+          if (proto?.type === 0 && proto.key?.id && m.key.remoteJid) {
+            markDeleted(canonicalJid(m.key.remoteJid), proto.key.id);
+            continue;
+          }
           // Hide only clearly-old history-sync replay. Messages delivered
           // because we were offline arrive as type "append" with timestamps
           // from while we were disconnected — those are recent (within
@@ -951,6 +1022,24 @@ export async function initWhatsApp(io: IO) {
               io.emit("chat-update", updatedChat);
             }
           }
+        }
+      });
+
+      sock.ev.on("messages.reaction", (reactions) => {
+        for (const r of reactions) {
+          if (!r.key.remoteJid || !r.key.id) continue;
+          const jid = canonicalJid(r.key.remoteJid);
+          const emoji = r.reaction?.text ?? "";
+          const reactorKey = r.reaction?.key;
+          const fromMe = !!reactorKey?.fromMe;
+          const rawSender = reactorKey?.participant ?? reactorKey?.remoteJid ?? undefined;
+          applyReaction(
+            jid,
+            r.key.id,
+            emoji,
+            fromMe,
+            rawSender ? canonicalJid(rawSender) : undefined,
+          );
         }
       });
 
@@ -1079,29 +1168,35 @@ export async function initWhatsApp(io: IO) {
       return id;
     },
     getMediaEntry: (id: string) => mediaCache.get(id),
-    markRead: async (jid: string) => {
+    markRead: (jid: string) => markReadInternal(jid),
+    markAllRead: async () => {
+      for (const chat of Array.from(chats.values())) {
+        if (chat.unreadCount > 0) await markReadInternal(chat.jid);
+      }
+    },
+    sendReaction: async (jid: string, messageId: string, emoji: string) => {
       if (!sock || status.state !== "connected") return;
-      const list = messages.get(jid);
-      if (!list || list.length === 0) return;
-      const unread = list.filter((m) => !m.fromMe && m.status !== "read");
-      if (unread.length === 0) return;
+      const raw = rawMessages.get(messageId);
+      if (!raw) return;
       try {
-        await sock.readMessages(
-          unread.map((m) => ({
-            id: m.id,
-            remoteJid: jid,
-            participant: m.participantJid,
-            fromMe: false,
-          })),
-        );
-        const chat = chats.get(jid);
-        if (chat && chat.unreadCount > 0) {
-          const updated: ChatInfo = { ...chat, unreadCount: 0 };
-          chats.set(jid, updated);
-          io.emit("chat-update", updated);
-        }
+        await sock.sendMessage(jid, { react: { text: emoji, key: raw.key } });
+        const me = sock.user?.id;
+        applyReaction(jid, messageId, emoji, true, me ? canonicalJid(me) : undefined);
       } catch (err) {
-        console.error("markRead failed", err);
+        console.error("sendReaction failed", err);
+      }
+    },
+    deleteMessage: async (jid: string, messageId: string, forEveryone: boolean) => {
+      if (!sock || status.state !== "connected") return;
+      try {
+        if (forEveryone) {
+          const raw = rawMessages.get(messageId);
+          if (raw) await sock.sendMessage(jid, { delete: raw.key });
+        }
+        // "delete for me" (and the local echo of "for everyone") just hide it.
+        markDeleted(jid, messageId);
+      } catch (err) {
+        console.error("deleteMessage failed", err);
       }
     },
     sendTyping: async (jid: string, isTyping: boolean) => {

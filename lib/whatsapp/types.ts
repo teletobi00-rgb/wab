@@ -47,6 +47,12 @@ export type QuotedInfo = {
   type: MessageType;
 };
 
+export type Reaction = {
+  emoji: string;
+  fromMe: boolean;
+  sender?: string;
+};
+
 export type MessageItem = {
   id: string;
   jid: string;
@@ -59,6 +65,8 @@ export type MessageItem = {
   participantJid?: string;
   media?: MediaInfo;
   quoted?: QuotedInfo;
+  reactions?: Reaction[];
+  deleted?: boolean;
 };
 
 export type PresenceState =

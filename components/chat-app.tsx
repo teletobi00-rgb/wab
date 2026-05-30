@@ -196,6 +196,7 @@ export function ChatApp() {
   const selectedChat = chats.find((c) => c.jid === selectedJid) ?? null;
   const selectedMessages = selectedJid ? (messagesByJid[selectedJid] ?? []) : [];
   const selectedPresence = selectedJid ? presenceByJid[selectedJid] : undefined;
+  const totalUnread = chats.reduce((sum, c) => sum + c.unreadCount, 0);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -212,6 +213,16 @@ export function ChatApp() {
           }}
         />
         <SearchBar value={query} onChange={setQuery} />
+        {totalUnread > 0 ? (
+          <button
+            type="button"
+            onClick={() => socket?.emit("mark-all-read")}
+            className="flex items-center justify-between border-b border-wa-border bg-wa-panel px-4 py-1.5 text-[12px] text-wa-text-muted transition-colors hover:bg-wa-panel-soft"
+          >
+            <span>안 읽음 {totalUnread}개</span>
+            <span className="font-medium text-wa-green">모두 읽음</span>
+          </button>
+        ) : null}
         <ChatList chats={chats} selectedJid={selectedJid} onSelect={setSelectedJid} query={query} />
       </aside>
       <main className="flex flex-1 flex-col bg-wa-bg">
@@ -273,6 +284,12 @@ export function ChatApp() {
                   if (!res.ok) alert(`'${fileName}' 전송에 실패했습니다.`);
                 },
               )
+            }
+            onReact={(messageId, emoji) =>
+              socket?.emit("send-reaction", { jid: selectedChat.jid, messageId, emoji })
+            }
+            onDelete={(messageId, forEveryone) =>
+              socket?.emit("delete-message", { jid: selectedChat.jid, messageId, forEveryone })
             }
           />
         ) : (
