@@ -54,6 +54,7 @@ export function ChatWindow({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [matchIdx, setMatchIdx] = useState(0);
+  const [exportOpen, setExportOpen] = useState(false);
   const isDragging = dragDepth > 0;
 
   const matchIds = useMemo(() => {
@@ -86,14 +87,26 @@ export function ChatWindow({
     scrollToMessage(matchIds[next]);
   }
 
-  function exportChat() {
-    const lines = messages.map((m) => {
+  function exportChat(fromMs?: number, toMs?: number) {
+    const inRange = messages.filter((m) => {
+      const t = m.timestamp * 1000;
+      if (fromMs && t < fromMs) return false;
+      if (toMs && t > toMs) return false;
+      return true;
+    });
+    const lines = inRange.map((m) => {
       const t = new Date(m.timestamp * 1000).toLocaleString("ko-KR");
       const who = m.fromMe ? "나" : (m.pushName ?? chat.name);
       const body = m.deleted ? "(삭제된 메시지)" : m.text || `[${m.type}]`;
       return `[${t}] ${who}: ${body}`;
     });
-    const header = `# ${chat.name} — 내보낸 시각 ${new Date().toLocaleString("ko-KR")}\n\n`;
+    const range =
+      fromMs || toMs
+        ? ` (${fromMs ? new Date(fromMs).toLocaleDateString("ko-KR") : "처음"} ~ ${
+            toMs ? new Date(toMs).toLocaleDateString("ko-KR") : "끝"
+          })`
+        : "";
+    const header = `# ${chat.name}${range} — 내보낸 시각 ${new Date().toLocaleString("ko-KR")}\n\n`;
     const blob = new Blob([header + lines.join("\n")], {
       type: "text/plain;charset=utf-8",
     });
@@ -330,7 +343,7 @@ export function ChatWindow({
         </button>
         <button
           type="button"
-          onClick={exportChat}
+          onClick={() => setExportOpen(true)}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
           title="대화 내보내기 (.txt)"
           aria-label="대화 내보내기"
@@ -459,7 +472,104 @@ export function ChatWindow({
           onClose={() => setLightbox(null)}
         />
       ) : null}
+      {exportOpen ? (
+        <ExportModal
+          onClose={() => setExportOpen(false)}
+          onExport={(fromMs, toMs) => {
+            exportChat(fromMs, toMs);
+            setExportOpen(false);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function ExportModal({
+  onExport,
+  onClose,
+}: {
+  onExport: (fromMs?: number, toMs?: number) => void;
+  onClose: () => void;
+}) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function run() {
+    const fromMs = from ? new Date(`${from}T00:00:00`).getTime() : undefined;
+    const toMs = to ? new Date(`${to}T23:59:59`).getTime() : undefined;
+    onExport(fromMs, toMs);
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label="배경 클릭으로 닫기"
+      className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
+          <h2 className="text-[15px] font-semibold text-wa-text">대화 내보내기</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+            aria-label="닫기"
+          >
+            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-4">
+          <p className="mb-3 text-[12px] text-wa-text-muted">
+            기간을 비워두면 전체를 내보냅니다. (앱이 받은 범위 내)
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="flex-1 text-[12px] text-wa-text">
+              시작
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="mt-1 w-full rounded-md bg-wa-panel-soft px-2 py-1.5 text-[13px] text-wa-text outline-none [color-scheme:dark] focus:ring-1 focus:ring-wa-green/60"
+              />
+            </label>
+            <label className="flex-1 text-[12px] text-wa-text">
+              끝
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="mt-1 w-full rounded-md bg-wa-panel-soft px-2 py-1.5 text-[13px] text-wa-text outline-none [color-scheme:dark] focus:ring-1 focus:ring-wa-green/60"
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={run}
+            className="mt-4 w-full rounded-md bg-wa-green py-2 text-[13px] font-medium text-white hover:bg-wa-green-soft"
+          >
+            .txt 다운로드
+          </button>
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -779,6 +889,34 @@ function quotedText(q: QuotedInfo): string {
   }
 }
 
+const TEXT_CLASS = "whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]";
+
+// Split text on URLs and render them as external links (opened in the system
+// browser via the window-open handler in the Electron main process).
+function linkify(text: string) {
+  return text.split(/(\bhttps?:\/\/[^\s]+)/gi).map((part, i) =>
+    /^https?:\/\//i.test(part) ? (
+      // biome-ignore lint/suspicious/noArrayIndexKey: split output is positional
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-wa-link underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  );
+}
+
+function LinkifiedText({ text, className }: { text: string; className?: string }) {
+  return <div className={className}>{linkify(text)}</div>;
+}
+
 function MessageContent({
   message,
   onOpenImage,
@@ -790,11 +928,7 @@ function MessageContent({
     return <div className="italic text-wa-text-muted">🚫 삭제된 메시지입니다</div>;
   }
   if (message.type === "text" && message.text) {
-    return (
-      <div className="whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
-        {message.text}
-      </div>
-    );
+    return <LinkifiedText text={message.text} className={TEXT_CLASS} />;
   }
   if (message.media?.url) {
     return <MediaContent message={message} url={message.media.url} onOpenImage={onOpenImage} />;
@@ -835,11 +969,7 @@ function MediaContent({
             alt=""
             className="max-h-80 max-w-full rounded-md object-contain"
           />
-          {message.text ? (
-            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
-              {message.text}
-            </div>
-          ) : null}
+          {message.text ? <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} /> : null}
         </button>
       );
     case "video":
@@ -847,11 +977,7 @@ function MediaContent({
         <>
           {/* biome-ignore lint/a11y/useMediaCaption: WhatsApp video has no captions track */}
           <video controls src={url} className="max-h-80 max-w-full rounded-md" />
-          {message.text ? (
-            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
-              {message.text}
-            </div>
-          ) : null}
+          {message.text ? <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} /> : null}
         </>
       );
     case "audio":
@@ -881,11 +1007,7 @@ function MediaContent({
             <span className="text-xl">📄</span>
             <span className="truncate text-[13px]">{name}</span>
           </a>
-          {caption ? (
-            <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed [overflow-wrap:anywhere]">
-              {caption}
-            </div>
-          ) : null}
+          {caption ? <LinkifiedText text={caption} className={`mt-1.5 ${TEXT_CLASS}`} /> : null}
         </>
       );
     }
