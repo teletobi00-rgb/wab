@@ -43,8 +43,10 @@ export function ChatWindow({
   onScheduleMessage: (text: string, sendAt: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const lastJidRef = useRef(chat.jid);
+  const justOpenedRef = useRef(true);
   const [dragDepth, setDragDepth] = useState(0);
   const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
   const [pending, setPending] = useState<PendingMedia[] | null>(null);
@@ -119,27 +121,56 @@ export function ChatWindow({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  function scrollToBottom(smooth = false) {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  }
+
   function handleScroll() {
     const el = scrollRef.current;
     if (!el) return;
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   }
 
+  // Scroll on chat switch / new messages.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
     const jidChanged = lastJidRef.current !== chat.jid;
     lastJidRef.current = chat.jid;
     if (jidChanged) {
-      // Opening a chat: jump to the latest instantly.
+      justOpenedRef.current = true;
       nearBottomRef.current = true;
-      el.scrollTo({ top: el.scrollHeight });
+    }
+    if (justOpenedRef.current) {
+      // Land at the latest message when opening a chat; the message list (and
+      // its images) may still be settling, so the ResizeObserver below keeps it
+      // pinned to the bottom until content stops growing.
+      scrollToBottom(false);
+      if (messages.length > 0) justOpenedRef.current = false;
     } else if (nearBottomRef.current) {
-      // Only auto-scroll on new messages if the user was already at the bottom —
-      // don't yank them down while they're reading older messages.
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      // Auto-scroll on new messages only if already at the bottom.
+      scrollToBottom(true);
     }
   }, [messages.length, chat.jid]);
+
+  // Follow content-height growth (image/video loading) and window resizes so the
+  // view stays pinned to the bottom when it should.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-bind when the list element mounts/unmounts
+  useEffect(() => {
+    const follow = () => {
+      if (justOpenedRef.current || nearBottomRef.current) scrollToBottom(false);
+    };
+    const content = contentRef.current;
+    let ro: ResizeObserver | undefined;
+    if (content) {
+      ro = new ResizeObserver(follow);
+      ro.observe(content);
+    }
+    window.addEventListener("resize", follow);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", follow);
+    };
+  }, [messages.length === 0]);
 
   useEffect(() => {
     setDragDepth(0);
@@ -423,7 +454,7 @@ export function ChatWindow({
             </p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div ref={contentRef} className="space-y-1">
             {messages.map((m, i) => (
               <MessageBubble
                 key={m.id}

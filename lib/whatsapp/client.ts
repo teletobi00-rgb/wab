@@ -428,7 +428,15 @@ export async function initWhatsApp(io: IO) {
     if (!sock || status.state !== "connected") return;
     avatarCache.set(jid, null); // mark in-flight so we don't refetch
     try {
-      const url = await sock.profilePictureUrl(jid, "image");
+      // Try full image, then the smaller preview (more permissive under some
+      // privacy settings). Either returns undefined when there's no picture.
+      let url = await sock.profilePictureUrl(jid, "image").catch((e) => {
+        logger.warn({ jid, err: String(e) }, "profilePictureUrl image failed");
+        return undefined;
+      });
+      if (!url) {
+        url = await sock.profilePictureUrl(jid, "preview").catch(() => undefined);
+      }
       if (url) {
         avatarCache.set(jid, url);
         const chat = chats.get(jid);
@@ -437,6 +445,8 @@ export async function initWhatsApp(io: IO) {
           chats.set(jid, updated);
           io.emit("chat-update", updated);
         }
+      } else {
+        logger.warn({ jid }, "no profile picture available");
       }
     } catch {
       avatarCache.set(jid, null);
@@ -1122,7 +1132,12 @@ export async function initWhatsApp(io: IO) {
           const emoji = r.reaction?.text ?? "";
           const reactorKey = r.reaction?.key;
           const fromMe = !!reactorKey?.fromMe;
-          const rawSender = reactorKey?.participant ?? reactorKey?.remoteJid ?? undefined;
+          // For our own reaction, the echo's key.remoteJid is the chat (the peer),
+          // not us — so use our own id to match the optimistic entry's sender and
+          // avoid a duplicate.
+          const rawSender = fromMe
+            ? sock?.user?.id
+            : (reactorKey?.participant ?? reactorKey?.remoteJid ?? undefined);
           applyReaction(jid, r.key.id, emoji, fromMe, normalizeSender(rawSender));
         }
       });
