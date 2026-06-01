@@ -343,6 +343,9 @@ export function ChatApp() {
             onScheduleMessage={(text, sendAt) =>
               socket?.emit("schedule-message", { jid: selectedChat.jid, text, sendAt })
             }
+            onSetAlias={(name) =>
+              socket?.emit("set-alias", { jid: selectedChat.jid, name })
+            }
           />
         ) : (
           <EmptyState />

@@ -218,6 +218,14 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
       }
     });
 
+    socket.on("set-alias", ({ jid, name }) => {
+      try {
+        wa?.setAlias(jid, name);
+      } catch (err) {
+        console.error("set-alias failed", err);
+      }
+    });
+
     socket.on("logout", async () => {
       try {
         await wa?.logout();

@@ -44,6 +44,10 @@ function resolveMediaDir(): string {
   return process.env.WAB_MEDIA_DIR ?? path.join(process.cwd(), "media_cache");
 }
 
+function resolveAliasFile(): string {
+  return process.env.WAB_ALIAS_FILE ?? path.join(process.cwd(), "aliases.json");
+}
+
 type IO = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
 
 type MediaCacheEntry = {
@@ -245,6 +249,10 @@ export async function initWhatsApp(io: IO) {
   const rawMessages = new Map<string, WAMessage>();
   const contactNames = new Map<string, string>();
   const groupSubjects = new Map<string, string>();
+  // User-assigned display names (overrides), persisted to disk so they survive
+  // re-login / restart. jid → custom name.
+  const aliases = new Map<string, string>();
+  const ALIAS_FILE = resolveAliasFile();
   // jid → profile picture URL (null = fetched but none / failed, don't retry).
   const avatarCache = new Map<string, string | null>();
   const mediaCache = new Map<string, MediaCacheEntry>();
@@ -311,6 +319,27 @@ export async function initWhatsApp(io: IO) {
   await fs.mkdir(AUTH_DIR, { recursive: true });
   await fs.mkdir(MEDIA_DIR, { recursive: true });
   await rehydrateMediaCache();
+  await loadAliases();
+
+  async function loadAliases() {
+    try {
+      const raw = await fs.readFile(ALIAS_FILE, "utf-8");
+      const obj = JSON.parse(raw);
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "string" && v) aliases.set(k, v);
+      }
+    } catch {
+      // no alias file yet — fine
+    }
+  }
+
+  async function saveAliases() {
+    try {
+      await fs.writeFile(ALIAS_FILE, JSON.stringify(Object.fromEntries(aliases)));
+    } catch (err) {
+      console.error("saveAliases failed", err);
+    }
+  }
 
   async function rehydrateMediaCache() {
     try {
@@ -377,21 +406,36 @@ export async function initWhatsApp(io: IO) {
   }
 
   function getDisplayName(jid: string): string {
+    // User-assigned alias always wins.
+    const alias = aliases.get(jid);
+    if (alias) return alias;
     const c = contactNames.get(jid);
     if (c) return c;
     if (jid.endsWith("@g.us")) return groupSubjects.get(jid) ?? "그룹";
     return formatJid(jid);
   }
 
+  function setAlias(jid: string, name: string) {
+    const v = (name ?? "").trim();
+    if (v) aliases.set(jid, v);
+    else aliases.delete(jid);
+    saveAliases().catch(() => {});
+    const chat = chats.get(jid);
+    if (chat) {
+      const updated: ChatInfo = { ...chat, name: getDisplayName(jid) };
+      chats.set(jid, updated);
+      io.emit("chat-update", updated);
+    }
+  }
+
   function applyContact(id: string | null | undefined, name: string | null | undefined) {
     if (!id || !name) return;
     contactNames.set(id, name);
-    // Always reflect the latest name onto the chat — the previous fallback-only
-    // condition missed chats that had inherited a foreign JID (e.g. an @lid
-    // number) as their name when an LID chat was merged into a phone chat.
+    // Reflect the resolved name (alias wins over contact name) onto the chat.
     const chat = chats.get(id);
-    if (chat && chat.name !== name) {
-      const updated: ChatInfo = { ...chat, name };
+    const resolved = getDisplayName(id);
+    if (chat && chat.name !== resolved) {
+      const updated: ChatInfo = { ...chat, name: resolved };
       chats.set(id, updated);
       io.emit("chat-update", updated);
     }
@@ -1221,6 +1265,7 @@ export async function initWhatsApp(io: IO) {
       return created;
     },
     ensureAvatar: (jid: string) => ensureAvatar(jid),
+    setAlias: (jid: string, name: string) => setAlias(jid, name),
     loadMessages: (jid: string, limit = 50) => {
       const list = messages.get(jid) ?? [];
       return list.slice(-limit);

@@ -57,5 +57,6 @@ export type ClientToServerEvents = {
     ack: (result: CheckNumberResult) => void,
   ) => void;
   "start-chat": (data: { jid: string }, ack: (chat: ChatInfo | null) => void) => void;
+  "set-alias": (data: { jid: string; name: string }) => void;
   logout: () => void;
 };

@@ -24,6 +24,7 @@ export function ChatWindow({
   onDelete,
   onForward,
   onScheduleMessage,
+  onSetAlias,
 }: {
   chat: ChatInfo;
   messages: MessageItem[];
@@ -41,6 +42,7 @@ export function ChatWindow({
   onDelete: (messageId: string, forEveryone: boolean) => void;
   onForward: (messageId: string) => void;
   onScheduleMessage: (text: string, sendAt: number) => void;
+  onSetAlias: (name: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -57,6 +59,7 @@ export function ChatWindow({
   const [searchQuery, setSearchQuery] = useState("");
   const [matchIdx, setMatchIdx] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
+  const [aliasOpen, setAliasOpen] = useState(false);
   const isDragging = dragDepth > 0;
 
   const matchIds = useMemo(() => {
@@ -360,6 +363,23 @@ export function ChatWindow({
         </div>
         <button
           type="button"
+          onClick={() => setAliasOpen(true)}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
+          title="이름 지정 (별칭)"
+          aria-label="이름 지정"
+        >
+          <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M4 20h4l10-10-4-4L4 16v4Z"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+            />
+            <path d="m13.5 6.5 4 4" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </button>
+        <button
+          type="button"
           onClick={() => setSearchOpen((o) => !o)}
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-wa-panel-hover ${
             searchOpen ? "text-wa-green" : "text-wa-text-muted hover:text-wa-text"
@@ -512,7 +532,102 @@ export function ChatWindow({
           }}
         />
       ) : null}
+      {aliasOpen ? (
+        <AliasModal
+          currentName={chat.name}
+          onClose={() => setAliasOpen(false)}
+          onSave={(name) => {
+            onSetAlias(name);
+            setAliasOpen(false);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function AliasModal({
+  currentName,
+  onSave,
+  onClose,
+}: {
+  currentName: string;
+  onSave: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(currentName);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <button
+      type="button"
+      aria-label="배경 클릭으로 닫기"
+      className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-sm overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
+          <h2 className="text-[15px] font-semibold text-wa-text">이름 지정</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+            aria-label="닫기"
+          >
+            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-5 py-4">
+          <p className="mb-3 text-[12px] text-wa-text-muted">
+            이 대화에 표시할 이름을 직접 지정합니다. 기기에 저장되어 다시 로그인해도 유지됩니다.
+          </p>
+          {/* biome-ignore lint/a11y/noAutofocus: modal opens for this input */}
+          <input
+            autoFocus
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSave(name);
+            }}
+            placeholder="표시할 이름"
+            className="w-full rounded-md bg-wa-panel-soft px-3 py-2 text-sm text-wa-text outline-none placeholder:text-wa-text-muted focus:ring-1 focus:ring-wa-green/60"
+          />
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => onSave("")}
+              className="rounded-md bg-wa-panel-soft px-3 py-2 text-[13px] text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+              title="지정한 이름을 지우고 원래 이름으로 되돌립니다"
+            >
+              초기화
+            </button>
+            <button
+              type="button"
+              onClick={() => onSave(name)}
+              className="flex-1 rounded-md bg-wa-green py-2 text-[13px] font-medium text-white hover:bg-wa-green-soft"
+            >
+              저장
+            </button>
+          </div>
+        </div>
+      </div>
+    </button>
   );
 }
 

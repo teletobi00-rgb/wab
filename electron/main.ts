@@ -21,6 +21,7 @@ process.on("uncaughtException", (err) => {
 const userDataPath = app.getPath("userData");
 process.env.WAB_AUTH_DIR = path.join(userDataPath, "auth");
 process.env.WAB_MEDIA_DIR = path.join(userDataPath, "media");
+process.env.WAB_ALIAS_FILE = path.join(userDataPath, "aliases.json");
 process.env.WAB_LOG_FILE = path.join(userDataPath, "wab.log");
 if (!process.env.WAB_LOG_LEVEL) process.env.WAB_LOG_LEVEL = "warn";
 
