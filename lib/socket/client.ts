@@ -10,7 +10,20 @@ let cachedSocket: TypedSocket | null = null;
 
 function getSocket(): TypedSocket {
   if (!cachedSocket) {
-    cachedSocket = io({ transports: ["websocket", "polling"] }) as TypedSocket;
+    // Start on HTTP long-polling and only *upgrade* to WebSocket if it works.
+    // Some endpoint-DLP agents (e.g. Digital Guardian) let the TCP connection
+    // establish but block the WebSocket upgrade, which previously left us stuck
+    // on "서버 연결 중" forever. Polling-first guarantees a connection; the
+    // upgrade is a silent best-effort bonus on machines that allow it.
+    cachedSocket = io({
+      transports: ["polling", "websocket"],
+      upgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Number.POSITIVE_INFINITY,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    }) as TypedSocket;
   }
   return cachedSocket;
 }
