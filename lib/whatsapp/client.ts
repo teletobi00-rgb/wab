@@ -245,6 +245,8 @@ export async function initWhatsApp(io: IO) {
   const rawMessages = new Map<string, WAMessage>();
   const contactNames = new Map<string, string>();
   const groupSubjects = new Map<string, string>();
+  // jid → profile picture URL (null = fetched but none / failed, don't retry).
+  const avatarCache = new Map<string, string | null>();
   const mediaCache = new Map<string, MediaCacheEntry>();
   // Running total of bytes held in mediaCache, so we can evict at runtime
   // instead of only on boot.
@@ -418,6 +420,29 @@ export async function initWhatsApp(io: IO) {
     }
   }
 
+  // Fetch a chat's profile picture once (cached). The URL is a WhatsApp CDN
+  // link the renderer loads directly; if it's unreachable the UI falls back to
+  // the initials avatar.
+  async function ensureAvatar(jid: string) {
+    if (avatarCache.has(jid)) return;
+    if (!sock || status.state !== "connected") return;
+    avatarCache.set(jid, null); // mark in-flight so we don't refetch
+    try {
+      const url = await sock.profilePictureUrl(jid, "image");
+      if (url) {
+        avatarCache.set(jid, url);
+        const chat = chats.get(jid);
+        if (chat) {
+          const updated: ChatInfo = { ...chat, avatarUrl: url };
+          chats.set(jid, updated);
+          io.emit("chat-update", updated);
+        }
+      }
+    } catch {
+      avatarCache.set(jid, null);
+    }
+  }
+
   function resolvePushName(jid: string): string | undefined {
     return contactNames.get(jid);
   }
@@ -451,6 +476,7 @@ export async function initWhatsApp(io: IO) {
       lastMessageStatus: c.lastMessageStatus ?? existing?.lastMessageStatus,
       lastMessageId: c.lastMessageId ?? existing?.lastMessageId,
       unreadCount: c.unreadCount ?? existing?.unreadCount ?? 0,
+      avatarUrl: c.avatarUrl ?? existing?.avatarUrl ?? avatarCache.get(c.jid) ?? undefined,
     };
     chats.set(c.jid, merged);
     return merged;
@@ -716,6 +742,8 @@ export async function initWhatsApp(io: IO) {
     if (item.jid.endsWith("@g.us")) {
       ensureGroupName(item.jid).catch(() => {});
     }
+    // Lazily fetch the chat's avatar the first time we see it.
+    ensureAvatar(item.jid).catch(() => {});
 
     if (needsDownload) scheduleMediaDownload(m, item.jid);
   }
@@ -1173,9 +1201,11 @@ export async function initWhatsApp(io: IO) {
       const existing = chats.get(jid);
       if (existing) return existing;
       const created = upsertChat({ jid, unreadCount: 0 });
+      ensureAvatar(jid).catch(() => {});
       io.emit("chat-update", created);
       return created;
     },
+    ensureAvatar: (jid: string) => ensureAvatar(jid),
     loadMessages: (jid: string, limit = 50) => {
       const list = messages.get(jid) ?? [];
       return list.slice(-limit);
@@ -1307,6 +1337,7 @@ export async function initWhatsApp(io: IO) {
       rawMessages.clear();
       contactNames.clear();
       groupSubjects.clear();
+      avatarCache.clear();
       mediaCache.clear();
       mediaTotalBytes = 0;
       lidToPhone.clear();

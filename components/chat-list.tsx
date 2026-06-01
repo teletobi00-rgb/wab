@@ -122,7 +122,7 @@ function ChatRow({
         isSelected ? "bg-wa-panel-hover" : "border-b border-wa-border hover:bg-wa-panel-soft/60"
       }`}
     >
-      <Avatar name={c.name} isGroup={c.isGroup} size="lg" />
+      <Avatar name={c.name} isGroup={c.isGroup} size="lg" src={c.avatarUrl} />
       <div className="min-w-0 flex-1 border-b border-transparent">
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1">

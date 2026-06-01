@@ -314,7 +314,7 @@ export function ChatWindow({
       onDrop={handleDrop}
     >
       <div className="flex items-center gap-3 border-b border-wa-border bg-wa-panel-soft px-4 py-2.5">
-        <Avatar name={chat.name} isGroup={chat.isGroup} size="md" />
+        <Avatar name={chat.name} isGroup={chat.isGroup} size="md" src={chat.avatarUrl} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] font-medium text-wa-text">{chat.name}</div>
           <div

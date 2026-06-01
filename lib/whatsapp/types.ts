@@ -13,6 +13,7 @@ export type ChatInfo = {
   lastMessageStatus?: MessageStatus;
   lastMessageId?: string;
   unreadCount: number;
+  avatarUrl?: string;
 };
 
 export type MessageType =

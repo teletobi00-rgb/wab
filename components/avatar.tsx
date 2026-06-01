@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 const COLORS = [
   "bg-violet-600",
   "bg-cyan-600",
@@ -41,14 +43,31 @@ export function Avatar({
   name,
   isGroup,
   size = "md",
+  src,
 }: {
   name: string;
   isGroup: boolean;
   size?: "sm" | "md" | "lg";
+  src?: string;
 }) {
   const sizeClass =
     size === "sm" ? "h-9 w-9 text-sm" : size === "lg" ? "h-12 w-12 text-base" : "h-10 w-10 text-sm";
   const bgClass = avatarColor((isGroup ? "g:" : "u:") + name);
+  // Reset the error flag when the src changes (e.g. avatar arrives later).
+  const [failed, setFailed] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on src change
+  useEffect(() => setFailed(false), [src]);
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        onError={() => setFailed(true)}
+        className={`shrink-0 rounded-full object-cover shadow-sm ${sizeClass}`}
+      />
+    );
+  }
   return (
     <div
       className={`flex shrink-0 select-none items-center justify-center rounded-full font-semibold text-white shadow-sm ${sizeClass} ${bgClass}`}

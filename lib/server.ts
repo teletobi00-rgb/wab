@@ -118,6 +118,7 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
 
     socket.on("load-messages", ({ jid, limit }, ack) => {
       const msgs = wa?.loadMessages(jid, limit ?? 50) ?? [];
+      wa?.ensureAvatar(jid).catch(() => {});
       ack(msgs);
     });
 
