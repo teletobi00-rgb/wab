@@ -51,6 +51,7 @@ export type Reaction = {
   emoji: string;
   fromMe: boolean;
   sender?: string;
+  senderName?: string;
 };
 
 export type MessageItem = {

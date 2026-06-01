@@ -298,6 +298,14 @@ export async function initWhatsApp(io: IO) {
     return jid;
   }
 
+  // Strip the device suffix (e.g. "123:5@s.whatsapp.net" → "123@s.whatsapp.net")
+  // then canonicalize @lid → phone, so the same person is one identity. Without
+  // this, reactions from different devices doubled up.
+  function normalizeSender(jid: string | null | undefined): string {
+    if (!jid) return "";
+    return canonicalJid(jid.replace(/:\d+(?=@)/, ""));
+  }
+
   await fs.mkdir(AUTH_DIR, { recursive: true });
   await fs.mkdir(MEDIA_DIR, { recursive: true });
   await rehydrateMediaCache();
@@ -755,9 +763,15 @@ export async function initWhatsApp(io: IO) {
     if (!list) return;
     const idx = list.findIndex((m) => m.id === targetId);
     if (idx < 0) return;
+    const key = sender ?? "";
+    // One reaction per sender: drop their previous one, then add the new emoji
+    // (empty emoji = reaction removed).
     const prev = list[idx].reactions ?? [];
-    const reactions = prev.filter((r) => (r.sender ?? "") !== (sender ?? ""));
-    if (emoji) reactions.push({ emoji, fromMe, sender });
+    const reactions = prev.filter((r) => (r.sender ?? "") !== key);
+    if (emoji) {
+      const senderName = fromMe ? "나" : sender ? getDisplayName(sender) : undefined;
+      reactions.push({ emoji, fromMe, sender, senderName });
+    }
     const merged = { ...list[idx], reactions };
     list[idx] = merged;
     io.emit("message-upsert", { jid, message: merged });
@@ -1081,13 +1095,7 @@ export async function initWhatsApp(io: IO) {
           const reactorKey = r.reaction?.key;
           const fromMe = !!reactorKey?.fromMe;
           const rawSender = reactorKey?.participant ?? reactorKey?.remoteJid ?? undefined;
-          applyReaction(
-            jid,
-            r.key.id,
-            emoji,
-            fromMe,
-            rawSender ? canonicalJid(rawSender) : undefined,
-          );
+          applyReaction(jid, r.key.id, emoji, fromMe, normalizeSender(rawSender));
         }
       });
 
@@ -1225,11 +1233,14 @@ export async function initWhatsApp(io: IO) {
     sendReaction: async (jid: string, messageId: string, emoji: string) => {
       if (!sock || status.state !== "connected") return;
       const raw = rawMessages.get(messageId);
-      if (!raw) return;
+      if (!raw?.key?.remoteJid) return;
       try {
-        await sock.sendMessage(jid, { react: { text: emoji, key: raw.key } });
-        const me = sock.user?.id;
-        applyReaction(jid, messageId, emoji, true, me ? canonicalJid(me) : undefined);
+        // Send to the chat the message key actually belongs to — the react
+        // payload's key.remoteJid (@lid or @s form) must match the destination
+        // jid, otherwise WhatsApp silently drops the reaction. Our `jid` arg is
+        // the canonicalized phone form, which mismatched.
+        await sock.sendMessage(raw.key.remoteJid, { react: { text: emoji, key: raw.key } });
+        applyReaction(canonicalJid(raw.key.remoteJid), messageId, emoji, true, normalizeSender(sock.user?.id));
       } catch (err) {
         console.error("sendReaction failed", err);
       }

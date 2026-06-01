@@ -688,19 +688,53 @@ function MessageActions({
 }
 
 function ReactionChips({ reactions }: { reactions: NonNullable<MessageItem["reactions"]> }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+
   const counts = new Map<string, number>();
   for (const r of reactions) counts.set(r.emoji, (counts.get(r.emoji) ?? 0) + 1);
+
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
-      {Array.from(counts.entries()).map(([emoji, n]) => (
-        <span
-          key={emoji}
-          className="inline-flex items-center gap-0.5 rounded-full bg-black/25 px-1.5 py-0.5 text-[11px] leading-none"
-        >
-          <span>{emoji}</span>
-          {n > 1 ? <span className="text-wa-text-muted">{n}</span> : null}
-        </span>
-      ))}
+    <div className="relative mt-1 inline-block">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        className="flex flex-wrap gap-1"
+        title="반응 보기"
+      >
+        {Array.from(counts.entries()).map(([emoji, n]) => (
+          <span
+            key={emoji}
+            className="inline-flex items-center gap-0.5 rounded-full bg-black/25 px-1.5 py-0.5 text-[11px] leading-none"
+          >
+            <span>{emoji}</span>
+            {n > 1 ? <span className="text-wa-text-muted">{n}</span> : null}
+          </span>
+        ))}
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-7 z-20 max-h-48 w-44 overflow-y-auto rounded-lg border border-wa-border bg-wa-panel-soft py-1 shadow-xl">
+          {reactions.map((r, i) => (
+            <div
+              key={`${r.sender ?? "me"}-${i}`}
+              className="flex items-center gap-2 px-3 py-1 text-[12px]"
+            >
+              <span className="text-[15px]">{r.emoji}</span>
+              <span className="truncate text-wa-text">
+                {r.senderName ?? (r.fromMe ? "나" : (r.sender?.split("@")[0] ?? "알 수 없음"))}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
