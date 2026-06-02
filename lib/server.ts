@@ -42,6 +42,29 @@ function getCookie(header: string | undefined, name: string): string | null {
   return null;
 }
 
+// Warn loudly in cloud mode if /data isn't an actual mounted volume. Baileys
+// would otherwise write the session to ephemeral container disk that vanishes
+// on the next restart, locking the user out (they can't re-scan QR from the
+// blocked network). Heuristic: a real mountpoint has a different device id
+// than the root filesystem.
+async function warnIfVolumeMissing(): Promise<void> {
+  if (!ACCESS_TOKEN) return; // cloud mode only
+  const authDir = process.env.WAB_AUTH_DIR ?? "";
+  if (!authDir.startsWith("/data")) return;
+  try {
+    const [dataStat, rootStat] = await Promise.all([fs.stat("/data"), fs.stat("/")]);
+    if (dataStat.dev === rootStat.dev) {
+      slog(
+        "⚠️  /data is NOT a mounted volume — the WhatsApp session will be LOST on restart. Attach a volume at /data (see DEPLOY.md step 5).",
+      );
+    } else {
+      slog("/data volume detected — session will persist across restarts");
+    }
+  } catch (err) {
+    slog(`volume check skipped: ${String(err)}`);
+  }
+}
+
 export type StartServerOptions = {
   port: number;
   dir?: string;
@@ -61,6 +84,13 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
   let wa: WhatsAppClient | null = null;
 
   const httpServer = createServer(async (req, res) => {
+    // Unauthenticated liveness probe for the hosting platform (Railway
+    // healthcheckPath). Leaks nothing beyond the WhatsApp connection state.
+    if (req.url === "/health" || req.url === "/healthz") {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: true, wa: wa?.getStatus().state ?? "init" }));
+      return;
+    }
     if (req.url?.startsWith("/media/") && wa) {
       if (ACCESS_TOKEN) {
         const u = new URL(req.url, "http://localhost");
@@ -138,6 +168,7 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
   console.log("Initializing WhatsApp client...");
   wa = await initWhatsApp(io);
   console.log("WhatsApp client ready (waiting for QR scan or session restore)");
+  await warnIfVolumeMissing();
 
   io.on("connection", (socket) => {
     slog(`socket connected id=${socket.id} transport=${socket.conn.transport.name}`);
@@ -309,6 +340,27 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     // Bind to loopback only. Without an explicit host Node listens on 0.0.0.0,
     // which would expose the user's entire WhatsApp session to anyone on the
     // same LAN (no auth). This is a single-user desktop app, so 127.0.0.1.
+    // Graceful shutdown. On Railway redeploy the container receives SIGTERM
+    // before SIGKILL; stop accepting connections and give in-flight saveCreds
+    // fs writes a moment to settle so the session on the /data volume isn't
+    // torn by a mid-write kill (which would force an un-performable QR re-scan).
+    // Local Electron quits via the tray and never receives SIGTERM.
+    let shuttingDown = false;
+    const shutdown = (sig: string) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      slog(`${sig} received — shutting down gracefully`);
+      try {
+        io.close();
+      } catch {}
+      try {
+        httpServer.close();
+      } catch {}
+      setTimeout(() => process.exit(0), 400);
+    };
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+
     // Cloud mode binds 0.0.0.0 so the platform can route external traffic; the
     // token gate above protects it. Local Electron mode stays loopback-only.
     const bindHost = process.env.WAB_BIND_HOST || (ACCESS_TOKEN ? "0.0.0.0" : "127.0.0.1");

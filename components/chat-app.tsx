@@ -3,7 +3,7 @@
 import { useChatPrefs } from "@/lib/chat-prefs";
 import { matchKeyword, useKeywords } from "@/lib/keywords";
 import { useNotifications } from "@/lib/notifications";
-import { applyToken, useSocket } from "@/lib/socket/client";
+import { applyToken, getStoredToken, useSocket } from "@/lib/socket/client";
 import { useTheme } from "@/lib/theme";
 import type {
   ChatInfo,
@@ -246,7 +246,13 @@ export function ChatApp() {
           onNewChat={() => setNewChatOpen(true)}
           onSettings={() => setSettingsOpen(true)}
           onLogout={() => {
-            if (confirm("정말 로그아웃 하시겠습니까? 세션이 삭제됩니다.")) {
+            // In cloud mode logout wipes the SHARED server session — every
+            // device disconnects and re-login needs a QR scan from a network
+            // that can reach WhatsApp (which the blocked office PC can't).
+            const msg = getStoredToken()
+              ? "정말 로그아웃 하시겠습니까?\n\n클라우드 서버의 WhatsApp 세션이 삭제되어 연결된 모든 기기에서 끊깁니다. 다시 쓰려면 WhatsApp 접속이 되는 네트워크에서 QR을 새로 스캔해야 합니다."
+              : "정말 로그아웃 하시겠습니까? 세션이 삭제됩니다.";
+            if (confirm(msg)) {
               socket?.emit("logout");
             }
           }}

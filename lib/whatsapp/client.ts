@@ -277,6 +277,11 @@ export async function initWhatsApp(io: IO) {
   // Pending reconnect timer + socket generation, so overlapping reconnects
   // can't spawn duplicate live sockets and stale events get ignored.
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Grows on each failed reconnect, reset on a successful "open". Drives the
+  // exponential backoff in scheduleReconnect so a persistently rejecting
+  // session on a 24/7 server can't hot-loop (~43k attempts/day) and escalate
+  // toward an account ban.
+  let reconnectAttempts = 0;
   let activeGen = 0;
   // Unix seconds. Set on connection.open. Messages older than this are treated
   // as history and not surfaced in the UI even though Baileys still processes
@@ -819,12 +824,17 @@ export async function initWhatsApp(io: IO) {
       .catch((err) => console.error("scheduleMediaDownload failed", err));
   }
 
-  function scheduleReconnect(delayMs: number) {
+  function scheduleReconnect(baseMs: number) {
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    // Exponential backoff capped at 60s, driven by reconnectAttempts (reset on
+    // a successful "open"). Prevents a 24/7 server from hot-looping reconnects
+    // when WhatsApp persistently rejects the session.
+    const delay = Math.min(baseMs * 2 ** reconnectAttempts, 60_000);
+    reconnectAttempts++;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       start().catch((e) => console.error("reconnect failed", e));
-    }, delayMs);
+    }, delay);
   }
 
   // Apply a reaction (or its removal when emoji is "") to a stored message and
@@ -1039,13 +1049,30 @@ export async function initWhatsApp(io: IO) {
             } catch (err) {
               console.error("auth wipe failed", err);
             }
+            reconnectAttempts = 0;
             scheduleReconnect(1000);
+          } else if (code === DisconnectReason.restartRequired) {
+            // Expected right after a fresh QR pairing — Baileys requires a prompt
+            // socket restart. Not a failure, so don't grow the backoff.
+            reconnectAttempts = 0;
+            scheduleReconnect(100);
+          } else if (
+            code === DisconnectReason.connectionReplaced ||
+            code === DisconnectReason.forbidden
+          ) {
+            // 440: another client/instance grabbed the session (two cloud
+            // instances on the same /data would ping-pong). 403: account
+            // blocked. Back off hard instead of fighting — reconnecting fast
+            // here escalates toward a ban.
+            logger.warn({ code }, "connection replaced or forbidden — backing off 60s");
+            scheduleReconnect(60_000);
           } else {
             scheduleReconnect(2000);
           }
         }
 
         if (connection === "open") {
+          reconnectAttempts = 0;
           const me = sock?.user;
           status = {
             state: "connected",

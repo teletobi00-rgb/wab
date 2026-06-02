@@ -66,6 +66,8 @@ export function applyToken(token: string): void {
   setStoredToken(token);
   const s = getSocket();
   s.auth = { token };
+  // Re-enable reconnection in case a prior unauthorized error disabled it.
+  s.io.opts.reconnection = true;
   s.disconnect().connect();
 }
 
@@ -86,7 +88,13 @@ export function useSocket() {
     const onDisconnect = () => setConnected(false);
     const onConnectError = (err: Error) => {
       // Server rejected the handshake token (cloud mode) — prompt for a token.
-      if (err.message === "unauthorized") setAuthError(true);
+      if (err.message === "unauthorized") {
+        setAuthError(true);
+        // Stop retrying with the stale token every 1-5s (which would spam the
+        // server after a token rotation). applyToken() re-enables reconnection.
+        s.io.opts.reconnection = false;
+        s.disconnect();
+      }
     };
     s.on("connect", onConnect);
     s.on("disconnect", onDisconnect);
