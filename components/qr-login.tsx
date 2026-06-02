@@ -28,8 +28,8 @@ export function QrLogin({ qr, status }: { qr: string | null; status: Status }) {
         <div className="px-8 py-6">
           <p className="mb-5 text-sm leading-relaxed text-wa-text-muted">
             폰의 메신저 앱에서{" "}
-            <strong className="text-wa-text">설정 → 연결된 기기 → 기기 연결</strong>로 들어가
-            아래 QR 코드를 스캔하세요.
+            <strong className="text-wa-text">설정 → 연결된 기기 → 기기 연결</strong>로 들어가 아래
+            QR 코드를 스캔하세요.
           </p>
 
           <div className="flex items-center justify-center rounded-xl bg-white p-4 shadow-inner">

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { appendFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
@@ -13,9 +14,11 @@ app.setAppUserModelId("com.wab.app");
 // unhandled rejection silently tear down the main process.
 process.on("unhandledRejection", (reason) => {
   console.error("unhandledRejection:", reason);
+  diagLog(`unhandledRejection: ${String(reason)}`);
 });
 process.on("uncaughtException", (err) => {
   console.error("uncaughtException:", err);
+  diagLog(`uncaughtException: ${err?.stack ?? String(err)}`);
 });
 
 const userDataPath = app.getPath("userData");
@@ -24,6 +27,16 @@ process.env.WAB_MEDIA_DIR = path.join(userDataPath, "media");
 process.env.WAB_ALIAS_FILE = path.join(userDataPath, "aliases.json");
 process.env.WAB_LOG_FILE = path.join(userDataPath, "wab.log");
 if (!process.env.WAB_LOG_LEVEL) process.env.WAB_LOG_LEVEL = "warn";
+
+// Diagnostic log (separate file from the pino/Baileys log to avoid a shared
+// file-handle contention on Windows). Captures main-process lifecycle and the
+// renderer's console, so connection failures are visible without DevTools.
+function diagLog(msg: string) {
+  const f = process.env.WAB_LOG_FILE;
+  if (!f) return;
+  const sf = f.endsWith(".log") ? `${f.slice(0, -4)}-server.log` : `${f}-server.log`;
+  appendFile(sf, `[main ${new Date().toISOString()}] ${msg}\n`).catch(() => {});
+}
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -179,6 +192,22 @@ async function createMainWindow(url: string) {
 
   mainWindow.removeMenu();
 
+  // Capture the renderer's console (incl. socket.io-client connect errors) into
+  // the diagnostic log so we can see why the client can't reach the server even
+  // in the packaged build where DevTools isn't normally available.
+  mainWindow.webContents.on(
+    "console-message",
+    (_e: Electron.Event, level: number, message: string) => {
+      diagLog(`renderer[${level}] ${message}`);
+    },
+  );
+  mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    diagLog(`did-fail-load: ${code} ${desc} ${url}`);
+  });
+  mainWindow.webContents.on("render-process-gone", (_e, details) => {
+    diagLog(`render-process-gone: ${details.reason} (exit ${details.exitCode})`);
+  });
+
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
@@ -290,12 +319,16 @@ app
   .whenReady()
   .then(async () => {
     try {
+      diagLog("app ready, booting server...");
       const url = process.env.WAB_DEV_URL ?? `http://127.0.0.1:${await bootServer()}`;
+      diagLog(`server booted, loading url=${url}`);
       createTray();
       await createMainWindow(url);
+      diagLog("main window created");
       setupAutoUpdater();
     } catch (err) {
       console.error("startup failed", err);
+      diagLog(`startup failed: ${String(err)}`);
       app.quit();
     }
   })

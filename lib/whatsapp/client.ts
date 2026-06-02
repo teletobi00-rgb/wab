@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+// Baileys is ESM-only; load it dynamically inside initWhatsApp so CJS output
+// (Electron production build) can interop with it.
+import type { WAMessage, WAMessageContent, WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
 import qrcode from "qrcode";
 import type { Server as SocketIOServer } from "socket.io";
@@ -13,13 +16,6 @@ import type {
   QuotedInfo,
   Status,
 } from "./types";
-// Baileys is ESM-only; load it dynamically inside initWhatsApp so CJS output
-// (Electron production build) can interop with it.
-import type {
-  WAMessage,
-  WAMessageContent,
-  WASocket,
-} from "@whiskeysockets/baileys";
 
 function buildLogger() {
   const level = process.env.WAB_LOG_LEVEL ?? "warn";
@@ -94,9 +90,11 @@ function unwrap(msg: WAMessageContent | null | undefined): WAMessageContent | nu
   return msg;
 }
 
-function previewFromContent(
-  content: WAMessageContent | null | undefined,
-): { text: string; type: MessageType; skip: boolean } {
+function previewFromContent(content: WAMessageContent | null | undefined): {
+  text: string;
+  type: MessageType;
+  skip: boolean;
+} {
   const msg = unwrap(content);
   if (!msg) return { text: "", type: "system", skip: true };
 
@@ -112,10 +110,8 @@ function previewFromContent(
   if (msg.conversation) return { text: msg.conversation, type: "text", skip: false };
   if (msg.extendedTextMessage?.text)
     return { text: msg.extendedTextMessage.text, type: "text", skip: false };
-  if (msg.imageMessage)
-    return { text: msg.imageMessage.caption ?? "", type: "image", skip: false };
-  if (msg.videoMessage)
-    return { text: msg.videoMessage.caption ?? "", type: "video", skip: false };
+  if (msg.imageMessage) return { text: msg.imageMessage.caption ?? "", type: "image", skip: false };
+  if (msg.videoMessage) return { text: msg.videoMessage.caption ?? "", type: "video", skip: false };
   if (msg.audioMessage)
     return { text: "", type: msg.audioMessage.ptt ? "voice" : "audio", skip: false };
   if (msg.documentMessage) {
@@ -347,8 +343,7 @@ export async function initWhatsApp(io: IO) {
       // Collect entries with size + mtime, then populate the Map in mtime
       // order so the Map's iteration order is oldest-first — runtime eviction
       // relies on that (keys().next() === oldest).
-      const entries: { id: string; size: number; mtimeMs: number; meta: MediaCacheEntry }[] =
-        [];
+      const entries: { id: string; size: number; mtimeMs: number; meta: MediaCacheEntry }[] = [];
       for (const file of files) {
         if (file.endsWith(".json")) continue;
         const full = path.join(MEDIA_DIR, file);
@@ -550,10 +545,8 @@ export async function initWhatsApp(io: IO) {
       name: resolvedName,
       isGroup: lidChat.isGroup,
       lastMessage: lidNewer ? lidChat.lastMessage : existing?.lastMessage,
-      lastMessageTime: Math.max(
-        lidChat.lastMessageTime ?? 0,
-        existing?.lastMessageTime ?? 0,
-      ) || undefined,
+      lastMessageTime:
+        Math.max(lidChat.lastMessageTime ?? 0, existing?.lastMessageTime ?? 0) || undefined,
       lastMessageFromMe: lidNewer ? lidChat.lastMessageFromMe : existing?.lastMessageFromMe,
       lastMessageStatus: lidNewer ? lidChat.lastMessageStatus : existing?.lastMessageStatus,
       unreadCount: (existing?.unreadCount ?? 0) + lidChat.unreadCount,
@@ -623,10 +616,7 @@ export async function initWhatsApp(io: IO) {
       remoteJidAlt?: string | null;
       participantAlt?: string | null;
     };
-    if (
-      key.remoteJid?.endsWith("@lid") &&
-      key.remoteJidAlt?.endsWith("@s.whatsapp.net")
-    ) {
+    if (key.remoteJid?.endsWith("@lid") && key.remoteJidAlt?.endsWith("@s.whatsapp.net")) {
       recordLidMapping(key.remoteJid, key.remoteJidAlt);
     }
     if (key.participant?.endsWith("@lid") && key.participantAlt?.endsWith("@s.whatsapp.net")) {
@@ -658,10 +648,15 @@ export async function initWhatsApp(io: IO) {
     const meta = getMediaMeta(m.message);
     if (!meta || !sock) return null;
     try {
-      const buffer = await downloadMediaMessage(m, "buffer", {}, {
-        logger,
-        reuploadRequest: sock.updateMediaMessage,
-      });
+      const buffer = await downloadMediaMessage(
+        m,
+        "buffer",
+        {},
+        {
+          logger,
+          reuploadRequest: sock.updateMediaMessage,
+        },
+      );
       const filePath = path.join(MEDIA_DIR, m.key.id);
       await fs.writeFile(filePath, buffer);
       await fs.writeFile(`${filePath}.json`, JSON.stringify(meta));
@@ -995,6 +990,21 @@ export async function initWhatsApp(io: IO) {
         if (myGen !== activeGen) return;
         const { connection, lastDisconnect, qr } = update;
 
+        // Diagnostic: trace every Baileys connection transition so we can tell
+        // whether the WhatsApp WebSocket is being blocked (DLP/firewall) vs a
+        // session conflict vs a logged-out device. Always at warn level so it
+        // lands in wab.log even in production.
+        logger.warn(
+          {
+            connection: connection ?? "(none)",
+            hasQr: !!qr,
+            code: (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)
+              ?.output?.statusCode,
+            err: (lastDisconnect?.error as Error | undefined)?.message,
+          },
+          "connection.update",
+        );
+
         if (qr) {
           try {
             currentQr = await qrcode.toDataURL(qr, { width: 280, margin: 1 });
@@ -1216,6 +1226,10 @@ export async function initWhatsApp(io: IO) {
       // blocked by the network) shouldn't prevent the app/window from opening.
       // Reconnect in the background instead.
       console.error("start failed, scheduling reconnect", err);
+      logger.warn(
+        { err: (err as Error)?.message ?? String(err) },
+        "start failed, scheduling reconnect",
+      );
       restarting = false;
       scheduleReconnect(3000);
     }
@@ -1238,9 +1252,7 @@ export async function initWhatsApp(io: IO) {
       }
       return items.sort((a, b) => a.name.localeCompare(b.name, "ko"));
     },
-    checkOnWhatsApp: async (
-      phone: string,
-    ): Promise<{ exists: boolean; jid?: string }> => {
+    checkOnWhatsApp: async (phone: string): Promise<{ exists: boolean; jid?: string }> => {
       if (!sock || status.state !== "connected") return { exists: false };
       const cleaned = phone.replace(/\D/g, "");
       if (!cleaned) return { exists: false };
@@ -1297,9 +1309,17 @@ export async function initWhatsApp(io: IO) {
       const quotedOpts = opts?.quoted ? { quoted: opts.quoted } : undefined;
       let sent: Awaited<ReturnType<NonNullable<typeof sock>["sendMessage"]>> | undefined;
       if (mimeType.startsWith("image/")) {
-        sent = await sock.sendMessage(jid, { image: buffer, caption, mimetype: mimeType }, quotedOpts);
+        sent = await sock.sendMessage(
+          jid,
+          { image: buffer, caption, mimetype: mimeType },
+          quotedOpts,
+        );
       } else if (mimeType.startsWith("video/")) {
-        sent = await sock.sendMessage(jid, { video: buffer, caption, mimetype: mimeType }, quotedOpts);
+        sent = await sock.sendMessage(
+          jid,
+          { video: buffer, caption, mimetype: mimeType },
+          quotedOpts,
+        );
       } else if (mimeType.startsWith("audio/")) {
         sent = await sock.sendMessage(jid, { audio: buffer, mimetype: mimeType }, quotedOpts);
       } else {
@@ -1330,7 +1350,13 @@ export async function initWhatsApp(io: IO) {
         // jid, otherwise WhatsApp silently drops the reaction. Our `jid` arg is
         // the canonicalized phone form, which mismatched.
         await sock.sendMessage(raw.key.remoteJid, { react: { text: emoji, key: raw.key } });
-        applyReaction(canonicalJid(raw.key.remoteJid), messageId, emoji, true, normalizeSender(sock.user?.id));
+        applyReaction(
+          canonicalJid(raw.key.remoteJid),
+          messageId,
+          emoji,
+          true,
+          normalizeSender(sock.user?.id),
+        );
       } catch (err) {
         console.error("sendReaction failed", err);
       }

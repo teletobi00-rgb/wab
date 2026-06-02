@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { ScheduledItem } from "@/lib/whatsapp/types";
+import { useEffect, useState } from "react";
 
 export function SettingsModal({
   keywords,
@@ -39,7 +39,10 @@ export function SettingsModal({
   useEffect(() => {
     if (typeof window === "undefined" || !window.wab) return;
     setHasBridge(true);
-    window.wab.getAutoLaunch().then(setAutoLaunch).catch(() => {});
+    window.wab
+      .getAutoLaunch()
+      .then(setAutoLaunch)
+      .catch(() => {});
   }, []);
 
   function toggleAutoLaunch() {
@@ -78,7 +81,12 @@ export function SettingsModal({
             aria-label="닫기"
           >
             <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path
+                d="m3 3 6 6M9 3l-6 6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>
@@ -86,8 +94,8 @@ export function SettingsModal({
         <div className="px-5 py-4">
           <h3 className="text-[13px] font-semibold text-wa-text">키워드 알림</h3>
           <p className="mt-1 text-[11px] text-wa-text-muted">
-            등록한 단어가 포함된 메시지는 채팅을 보고 있어도 알림이 울립니다. (이름,
-            현장 코드, “긴급” 등)
+            등록한 단어가 포함된 메시지는 채팅을 보고 있어도 알림이 울립니다. (이름, 현장 코드,
+            “긴급” 등)
           </p>
           <div className="mt-3 flex gap-2">
             <input

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { useTemplates } from "@/lib/templates";
 import type { MessageItem } from "@/lib/whatsapp/types";
+import { useEffect, useRef, useState } from "react";
 import { EmojiPicker } from "./emoji-picker";
 
 export function MessageInput({
@@ -78,9 +78,7 @@ export function MessageInput({
   return (
     <div className="relative border-t border-wa-border bg-wa-panel-soft">
       {replyTo ? <ReplyPreview message={replyTo} onCancel={onCancelReply} /> : null}
-      {emojiOpen ? (
-        <EmojiPicker onPick={insertText} onClose={() => setEmojiOpen(false)} />
-      ) : null}
+      {emojiOpen ? <EmojiPicker onPick={insertText} onClose={() => setEmojiOpen(false)} /> : null}
       {templateOpen ? (
         <TemplatePopup
           templates={templates}
@@ -108,13 +106,7 @@ export function MessageInput({
         />
       ) : null}
       <div className="flex items-center gap-2 px-3 py-2.5">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={handleFile}
-        />
+        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFile} />
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}

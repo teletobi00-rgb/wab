@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import type { TypedSocket } from "@/lib/socket/client";
 import type { ContactItem } from "@/lib/whatsapp/types";
+import { useEffect, useMemo, useState } from "react";
 import { Avatar } from "./avatar";
 
 export function NewChatModal({

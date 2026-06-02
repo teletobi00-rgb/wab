@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import type { ChatInfo } from "@/lib/whatsapp/types";
+import { useEffect, useMemo, useState } from "react";
 import { Avatar } from "./avatar";
 
 export function ForwardModal({
@@ -57,7 +57,12 @@ export function ForwardModal({
             aria-label="닫기"
           >
             <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path
+                d="m3 3 6 6M9 3l-6 6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>
@@ -74,9 +79,7 @@ export function ForwardModal({
 
         <div className="max-h-[45vh] overflow-y-auto py-2">
           {filtered.length === 0 ? (
-            <div className="px-5 py-8 text-center text-xs text-wa-text-muted">
-              대화가 없습니다.
-            </div>
+            <div className="px-5 py-8 text-center text-xs text-wa-text-muted">대화가 없습니다.</div>
           ) : (
             filtered.map((c) => (
               <button

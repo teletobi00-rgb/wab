@@ -17,12 +17,7 @@ export function SearchBar({
           aria-hidden="true"
         >
           <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
-          <path
-            d="m20 20-3.5-3.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
+          <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>
         <input
           type="text"

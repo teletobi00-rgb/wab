@@ -71,12 +71,7 @@ export type MessageItem = {
   deleted?: boolean;
 };
 
-export type PresenceState =
-  | "available"
-  | "composing"
-  | "recording"
-  | "paused"
-  | "unavailable";
+export type PresenceState = "available" | "composing" | "recording" | "paused" | "unavailable";
 
 export type PresenceUpdate = {
   jid: string;

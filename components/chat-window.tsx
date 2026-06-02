@@ -1,6 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatInfo,
   MessageItem,
@@ -8,6 +7,7 @@ import type {
   PresenceState,
   QuotedInfo,
 } from "@/lib/whatsapp/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatar";
 import { ImageLightbox } from "./image-lightbox";
 import { MediaPreview, type PendingMedia } from "./media-preview";
@@ -65,9 +65,7 @@ export function ChatWindow({
   const matchIds = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
-    return messages
-      .filter((m) => !m.deleted && m.text.toLowerCase().includes(q))
-      .map((m) => m.id);
+    return messages.filter((m) => !m.deleted && m.text.toLowerCase().includes(q)).map((m) => m.id);
   }, [messages, searchQuery]);
   const activeMatchId = matchIds[matchIdx];
 
@@ -211,13 +209,9 @@ export function ChatWindow({
       }
       try {
         const buffer = await file.arrayBuffer();
-        const isPreviewable =
-          file.type.startsWith("image/") || file.type.startsWith("video/");
+        const isPreviewable = file.type.startsWith("image/") || file.type.startsWith("video/");
         const previewUrl = isPreviewable ? URL.createObjectURL(file) : null;
-        const fallbackExt = (file.type.split("/")[1] || "bin").replace(
-          /[^a-z0-9]/gi,
-          "",
-        );
+        const fallbackExt = (file.type.split("/")[1] || "bin").replace(/[^a-z0-9]/gi, "");
         const name = file.name || `pasted-${Date.now()}.${fallbackExt}`;
         items.push({
           name,
@@ -246,19 +240,14 @@ export function ChatWindow({
     const replyId = replyTo?.id;
     const caption = pendingCaption.trim() || undefined;
     pending.forEach((p, i) => {
-      onSendMedia(
-        p.name,
-        p.mimeType,
-        p.buffer,
-        i === 0 ? caption : undefined,
-        replyId,
-      );
+      onSendMedia(p.name, p.mimeType, p.buffer, i === 0 ? caption : undefined, replyId);
     });
     clearPending();
     setReplyTo(null);
   }, [pending, pendingCaption, replyTo, onSendMedia, clearPending]);
 
-  const subtitle = presenceText(presence) ?? (chat.isGroup ? "그룹 채팅" : formatJidShort(chat.jid));
+  const subtitle =
+    presenceText(presence) ?? (chat.isGroup ? "그룹 채팅" : formatJidShort(chat.jid));
 
   function handleSend(text: string) {
     onSend(text, replyTo?.id);
@@ -389,7 +378,12 @@ export function ChatWindow({
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
-            <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <path
+              d="m20 20-3.5-3.5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
           </svg>
         </button>
         <button
@@ -456,7 +450,12 @@ export function ChatWindow({
             aria-label="검색 닫기"
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path
+                d="m3 3 6 6M9 3l-6 6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>
@@ -588,7 +587,12 @@ function AliasModal({
             aria-label="닫기"
           >
             <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path
+                d="m3 3 6 6M9 3l-6 6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>
@@ -678,7 +682,12 @@ function ExportModal({
             aria-label="닫기"
           >
             <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <path
+                d="m3 3 6 6M9 3l-6 6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
             </svg>
           </button>
         </div>
@@ -785,9 +794,7 @@ function MessageBubble({
   return (
     <div
       data-msgid={message.id}
-      className={`group flex w-full items-start gap-1.5 ${
-        isOut ? "justify-end" : "justify-start"
-      }`}
+      className={`group flex w-full items-start gap-1.5 ${isOut ? "justify-end" : "justify-start"}`}
     >
       {isOut ? actions : null}
       <div
@@ -1110,12 +1117,10 @@ function MediaContent({
           className="block w-full cursor-zoom-in text-left"
           aria-label="이미지 확대"
         >
-          <img
-            src={url}
-            alt=""
-            className="max-h-80 max-w-full rounded-md object-contain"
-          />
-          {message.text ? <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} /> : null}
+          <img src={url} alt="" className="max-h-80 max-w-full rounded-md object-contain" />
+          {message.text ? (
+            <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} />
+          ) : null}
         </button>
       );
     case "video":
@@ -1123,7 +1128,9 @@ function MediaContent({
         <>
           {/* biome-ignore lint/a11y/useMediaCaption: WhatsApp video has no captions track */}
           <video controls src={url} className="max-h-80 max-w-full rounded-md" />
-          {message.text ? <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} /> : null}
+          {message.text ? (
+            <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} />
+          ) : null}
         </>
       );
     case "audio":
@@ -1141,8 +1148,7 @@ function MediaContent({
       // Show caption below the file badge when the sender attached one.
       // Filter out the case where text equals the filename (our fallback when
       // no real caption is present) so we don't print it twice.
-      const caption =
-        message.text && message.text !== name ? message.text : null;
+      const caption = message.text && message.text !== name ? message.text : null;
       return (
         <>
           <a
@@ -1221,7 +1227,12 @@ function StatusIcon({ status }: { status: MessageStatus }) {
         aria-hidden="true"
       >
         <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M8 4.5v3.7l2.3 1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path
+          d="M8 4.5v3.7l2.3 1.4"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
       </svg>
     );
   }

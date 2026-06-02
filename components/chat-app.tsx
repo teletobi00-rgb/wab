@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { useChatPrefs } from "@/lib/chat-prefs";
 import { matchKeyword, useKeywords } from "@/lib/keywords";
 import { useNotifications } from "@/lib/notifications";
-import { useSocket } from "@/lib/socket/client";
+import { applyToken, useSocket } from "@/lib/socket/client";
 import { useTheme } from "@/lib/theme";
 import type {
   ChatInfo,
@@ -15,6 +14,7 @@ import type {
   ScheduledItem,
   Status,
 } from "@/lib/whatsapp/types";
+import { useEffect, useRef, useState } from "react";
 import { Avatar } from "./avatar";
 import { ChatList } from "./chat-list";
 import { ChatWindow } from "./chat-window";
@@ -29,7 +29,7 @@ import { SettingsModal } from "./settings-modal";
 const MESSAGES_PER_CHAT_CAP = 500;
 
 export function ChatApp() {
-  const { socket, connected: socketConnected } = useSocket();
+  const { socket, connected: socketConnected, authError } = useSocket();
   const [status, setStatus] = useState<Status>({ state: "disconnected" });
   const [qr, setQr] = useState<string | null>(null);
   const [chats, setChats] = useState<ChatInfo[]>([]);
@@ -142,8 +142,7 @@ export function ChatApp() {
       if (message.fromMe) return;
       const matched = matchKeyword(message.text, keywordsRef.current);
       const isCurrent = selectedJidRef.current === jid;
-      const isVisible =
-        typeof document !== "undefined" && document.visibilityState === "visible";
+      const isVisible = typeof document !== "undefined" && document.visibilityState === "visible";
       const hasFocus = typeof document !== "undefined" && document.hasFocus();
       const inFocus = isCurrent && isVisible && hasFocus;
 
@@ -228,6 +227,7 @@ export function ChatApp() {
     socket.emit("mark-read", { jid: selectedJid });
   }, [socket, selectedJid]);
 
+  if (authError) return <TokenGate />;
   if (!socketConnected) return <Centered>서버 연결 중...</Centered>;
   if (status.state !== "connected") return <QrLogin qr={qr} status={status} />;
 
@@ -314,9 +314,7 @@ export function ChatApp() {
                 });
               });
             }}
-            onTyping={(isTyping) =>
-              socket?.emit("typing", { jid: selectedChat.jid, isTyping })
-            }
+            onTyping={(isTyping) => socket?.emit("typing", { jid: selectedChat.jid, isTyping })}
             onSendMedia={(fileName, mimeType, data, caption, replyToId) =>
               socket?.emit(
                 "send-media",
@@ -343,9 +341,7 @@ export function ChatApp() {
             onScheduleMessage={(text, sendAt) =>
               socket?.emit("schedule-message", { jid: selectedChat.jid, text, sendAt })
             }
-            onSetAlias={(name) =>
-              socket?.emit("set-alias", { jid: selectedChat.jid, name })
-            }
+            onSetAlias={(name) => socket?.emit("set-alias", { jid: selectedChat.jid, name })}
           />
         ) : (
           <EmptyState />
@@ -444,6 +440,44 @@ function Centered({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-wa-bg text-wa-text-muted">
       {children}
+    </div>
+  );
+}
+
+// Cloud-mode access gate. Shown when the server rejects the handshake token
+// (unauthorized). The local Electron build never reaches this — the server has
+// no token configured, so connection succeeds without one.
+function TokenGate() {
+  const [token, setToken] = useState("");
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = token.trim();
+    if (t) applyToken(t);
+  };
+  return (
+    <div className="flex h-screen w-screen items-center justify-center bg-wa-bg">
+      <form
+        onSubmit={submit}
+        className="flex w-[320px] flex-col gap-4 rounded-xl border border-wa-border bg-wa-panel p-6 shadow-xl"
+      >
+        <div className="text-lg font-semibold text-wa-text">WAB 접속</div>
+        <div className="text-sm text-wa-text-muted">접속 토큰을 입력하세요.</div>
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="접속 토큰"
+          // biome-ignore lint/a11y/noAutofocus: single-field gate, focus is expected
+          autoFocus
+          className="rounded-lg border border-wa-border bg-wa-bg px-3 py-2 text-sm text-wa-text outline-none focus:border-emerald-500"
+        />
+        <button
+          type="submit"
+          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
+        >
+          접속
+        </button>
+      </form>
     </div>
   );
 }

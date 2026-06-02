@@ -1,0 +1,16 @@
+node_modules
+.next
+dist
+release
+release2
+wab-rel
+.git
+.gitignore
+npm-debug.log*
+*.log
+auth_info_baileys
+media_cache
+aliases.json
+# Electron/desktop-only artifacts not needed for the cloud server build
+electron
+scripts/fix-wincodesign.mjs

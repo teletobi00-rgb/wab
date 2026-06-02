@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import type { ChatInfo, MessageStatus } from "@/lib/whatsapp/types";
+import { useEffect, useMemo, useState } from "react";
 import { Avatar } from "./avatar";
 
 export function ChatList({
@@ -212,7 +212,12 @@ function ChatStatusIcon({ status }: { status: MessageStatus }) {
         className="shrink-0 text-wa-text-muted/70"
       >
         <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M8 4.5v3.7l2.3 1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path
+          d="M8 4.5v3.7l2.3 1.4"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
       </svg>
     );
   }

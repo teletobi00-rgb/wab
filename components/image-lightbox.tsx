@@ -53,7 +53,12 @@ export function ImageLightbox({
           title="닫기 (Esc)"
         >
           <svg width="18" height="18" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-            <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <path
+              d="m3 3 6 6M9 3l-6 6"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
           </svg>
         </button>
       </div>

@@ -3,9 +3,44 @@ import { createServer } from "node:http";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "./socket/events";
-import { initWhatsApp, type WhatsAppClient } from "./whatsapp/client";
+import { type WhatsAppClient, initWhatsApp } from "./whatsapp/client";
 
 const MEDIA_MAX_BYTES = 100 * 1024 * 1024;
+
+// Diagnostic logger for server-side connection issues (DLP blocking, listen
+// failures) which are otherwise invisible in the packaged app.
+function serverLogPath(): string | null {
+  const file = process.env.WAB_LOG_FILE;
+  if (!file) return null;
+  // Write to a SEPARATE file from the pino/Baileys log. Sharing the file makes
+  // fs.appendFile contend with pino's held handle on Windows and silently fail.
+  return file.endsWith(".log") ? `${file.slice(0, -4)}-server.log` : `${file}-server.log`;
+}
+
+function slog(msg: string) {
+  const line = `[server ${new Date().toISOString()}] ${msg}\n`;
+  console.log(line.trimEnd());
+  const file = serverLogPath();
+  if (file) fs.appendFile(file, line).catch(() => {});
+}
+
+// Optional shared access token for cloud/remote deployments. When set, both the
+// Socket.IO handshake and /media requests must present it (socket auth payload
+// and a cookie, respectively). Empty in the local Electron build → no gate, so
+// loopback-only security is preserved there.
+const ACCESS_TOKEN = process.env.WAB_ACCESS_TOKEN?.trim() || "";
+
+function getCookie(header: string | undefined, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === name) {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    }
+  }
+  return null;
+}
 
 export type StartServerOptions = {
   port: number;
@@ -27,6 +62,15 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
 
   const httpServer = createServer(async (req, res) => {
     if (req.url?.startsWith("/media/") && wa) {
+      if (ACCESS_TOKEN) {
+        const u = new URL(req.url, "http://localhost");
+        const tok = u.searchParams.get("token") || getCookie(req.headers.cookie, "wab_token");
+        if (tok !== ACCESS_TOKEN) {
+          res.statusCode = 401;
+          res.end("Unauthorized");
+          return;
+        }
+      }
       const id = decodeURIComponent(req.url.slice("/media/".length).split("?")[0] ?? "");
       const entry = wa.getMediaEntry(id);
       if (!entry) {
@@ -60,7 +104,10 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     // hijacking the socket (CSWSH), now that we also bind to 127.0.0.1 below.
     cors: {
       origin: (origin, callback) => {
-        if (!origin || isLoopbackOrigin(origin)) {
+        // Cloud (token) mode: the access token is the security boundary and the
+        // page is served same-origin from the host, so allow any origin here and
+        // gate on the token in io.use() below. Local mode stays loopback-only.
+        if (ACCESS_TOKEN || !origin || isLoopbackOrigin(origin)) {
           callback(null, true);
         } else {
           callback(new Error("Origin not allowed"), false);
@@ -70,11 +117,34 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     maxHttpBufferSize: MEDIA_MAX_BYTES,
   });
 
+  // Cloud auth gate: require the shared token in the Socket.IO handshake before
+  // any events flow. No token configured → local Electron build → open.
+  if (ACCESS_TOKEN) {
+    io.use((socket, next) => {
+      const tok =
+        (socket.handshake.auth as { token?: string } | undefined)?.token ||
+        getCookie(socket.handshake.headers.cookie, "wab_token");
+      if (tok === ACCESS_TOKEN) next();
+      else next(new Error("unauthorized"));
+    });
+  }
+
+  // Surface low-level Engine.IO handshake failures (CORS rejects, transport
+  // errors, DLP interference) which otherwise stay invisible.
+  io.engine.on("connection_error", (err: { code?: number; message?: string }) => {
+    slog(`engine connection_error: code=${err.code} msg=${err.message}`);
+  });
+
   console.log("Initializing WhatsApp client...");
   wa = await initWhatsApp(io);
   console.log("WhatsApp client ready (waiting for QR scan or session restore)");
 
   io.on("connection", (socket) => {
+    slog(`socket connected id=${socket.id} transport=${socket.conn.transport.name}`);
+    socket.conn.on("upgrade", () =>
+      slog(`socket ${socket.id} upgraded to ${socket.conn.transport.name}`),
+    );
+    socket.on("disconnect", (reason) => slog(`socket ${socket.id} disconnect: ${reason}`));
     if (!wa) return;
     socket.emit("status", wa.getStatus());
     const qr = wa.getQr();
@@ -239,13 +309,19 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     // Bind to loopback only. Without an explicit host Node listens on 0.0.0.0,
     // which would expose the user's entire WhatsApp session to anyone on the
     // same LAN (no auth). This is a single-user desktop app, so 127.0.0.1.
-    httpServer.listen(options.port, "127.0.0.1", () => {
+    // Cloud mode binds 0.0.0.0 so the platform can route external traffic; the
+    // token gate above protects it. Local Electron mode stays loopback-only.
+    const bindHost = process.env.WAB_BIND_HOST || (ACCESS_TOKEN ? "0.0.0.0" : "127.0.0.1");
+    httpServer.listen(options.port, bindHost, () => {
       const address = httpServer.address();
       const port = typeof address === "object" && address ? address.port : options.port;
-      console.log(`> Ready on http://127.0.0.1:${port}`);
+      slog(`HTTP server listening on ${bindHost}:${port}`);
       resolve({ port });
     });
-    httpServer.on("error", reject);
+    httpServer.on("error", (err) => {
+      slog(`HTTP server error: ${String(err)}`);
+      reject(err);
+    });
   });
 }
 

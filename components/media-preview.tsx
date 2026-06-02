@@ -42,8 +42,7 @@ export function MediaPreview({
   const isImage = current.mimeType.startsWith("image/");
   const isVideo = current.mimeType.startsWith("video/");
   const sizeKB = current.buffer.byteLength / 1024;
-  const sizeText =
-    sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB.toFixed(0)} KB`;
+  const sizeText = sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB.toFixed(0)} KB`;
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-wa-bg">
@@ -130,9 +129,7 @@ export function MediaPreview({
           type="text"
           value={caption}
           onChange={(e) => onCaptionChange(e.target.value)}
-          placeholder={
-            items.length > 1 ? "캡션 추가 (첫 파일에 적용)..." : "캡션 추가..."
-          }
+          placeholder={items.length > 1 ? "캡션 추가 (첫 파일에 적용)..." : "캡션 추가..."}
           // biome-ignore lint/a11y/noAutofocus: preview opens just for this input
           autoFocus
           className="flex-1 rounded-md bg-wa-panel px-4 py-2.5 text-[14px] text-wa-text outline-none placeholder:text-wa-text-muted focus:ring-1 focus:ring-wa-green/60"

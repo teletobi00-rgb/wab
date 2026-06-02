@@ -52,10 +52,7 @@ export type ClientToServerEvents = {
   typing: (data: { jid: string; isTyping: boolean }) => void;
   "subscribe-presence": (data: { jid: string }) => void;
   "list-contacts": (ack: (contacts: ContactItem[]) => void) => void;
-  "check-number": (
-    data: { phone: string },
-    ack: (result: CheckNumberResult) => void,
-  ) => void;
+  "check-number": (data: { phone: string }, ack: (result: CheckNumberResult) => void) => void;
   "start-chat": (data: { jid: string }, ack: (chat: ChatInfo | null) => void) => void;
   "set-alias": (data: { jid: string; name: string }) => void;
   logout: () => void;

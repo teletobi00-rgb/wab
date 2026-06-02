@@ -30,6 +30,9 @@ next-env.d.ts
 # Electron / build output
 dist/
 release/
+release2/
+wab-rel/
+*.asar
 
 # WhatsApp/WAB session (sensitive!)
 auth_info_baileys/

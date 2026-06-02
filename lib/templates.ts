@@ -27,38 +27,32 @@ export function useTemplates() {
     }
   }, []);
 
-  const add = useCallback(
-    (text: string) => {
-      const v = text.trim();
-      if (!v) return;
-      setTemplates((prev) => {
-        if (prev.includes(v)) return prev;
-        const next = [...prev, v];
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        } catch {
-          // ignore
-        }
-        return next;
-      });
-    },
-    [],
-  );
+  const add = useCallback((text: string) => {
+    const v = text.trim();
+    if (!v) return;
+    setTemplates((prev) => {
+      if (prev.includes(v)) return prev;
+      const next = [...prev, v];
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
 
-  const remove = useCallback(
-    (index: number) => {
-      setTemplates((prev) => {
-        const next = prev.filter((_, i) => i !== index);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        } catch {
-          // ignore
-        }
-        return next;
-      });
-    },
-    [],
-  );
+  const remove = useCallback((index: number) => {
+    setTemplates((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
 
   return { templates, add, remove, persist };
 }
