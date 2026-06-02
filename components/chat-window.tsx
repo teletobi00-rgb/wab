@@ -602,9 +602,12 @@ function AliasModal({
   }, [onClose]);
 
   return (
-    <button
-      type="button"
-      aria-label="배경 클릭으로 닫기"
+    // Backdrop is a div (not a button) so typing a space inside the input
+    // doesn't trigger native button activation and close the modal. Escape
+    // closes it (handler above); click-to-close is mouse convenience.
+    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-close, Escape handles keyboard
+    <div
+      role="presentation"
       className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
       onClick={onClose}
     >
@@ -668,7 +671,7 @@ function AliasModal({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 

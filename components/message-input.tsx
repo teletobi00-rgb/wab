@@ -28,6 +28,15 @@ export function MessageInput({
   const isTypingRef = useRef(false);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow the textarea with its content, up to the max-height cap.
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+  }, [text]);
 
   function insertText(s: string) {
     setText((t) => t + s);
@@ -158,12 +167,16 @@ export function MessageInput({
         >
           🕐
         </button>
-        <input
-          type="text"
+        <textarea
+          ref={taRef}
           value={text}
+          rows={1}
           onChange={(e) => handleChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            // Enter sends; Shift+Enter inserts a newline (textarea default).
+            // isComposing guard: don't send mid-Hangul-composition (the last
+            // jamo would be cut off).
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               submit();
             } else if (e.key === "Escape" && replyTo) {
@@ -171,7 +184,7 @@ export function MessageInput({
             }
           }}
           placeholder={replyTo ? "답장 메시지 입력..." : "메시지 입력..."}
-          className="flex-1 rounded-lg bg-wa-panel px-4 py-2.5 text-[14px] text-wa-text outline-none transition-shadow placeholder:text-wa-text-muted focus:ring-1 focus:ring-wa-green/60"
+          className="max-h-32 flex-1 resize-none rounded-lg bg-wa-panel px-4 py-2.5 text-[14px] leading-relaxed text-wa-text outline-none transition-shadow placeholder:text-wa-text-muted focus:ring-1 focus:ring-wa-green/60"
         />
         <button
           type="button"
