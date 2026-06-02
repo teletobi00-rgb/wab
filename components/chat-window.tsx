@@ -8,7 +8,7 @@ import type {
   PresenceState,
   QuotedInfo,
 } from "@/lib/whatsapp/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatar";
 import { ImageLightbox } from "./image-lightbox";
 import { MediaPreview, type PendingMedia } from "./media-preview";
@@ -896,16 +896,25 @@ function SummaryModal({
                   메시지 {result.meta?.messageCount ?? 0}개 · 이미지 {result.meta?.imageCount ?? 0}
                   장
                 </span>
-                <button
-                  type="button"
-                  onClick={() => navigator.clipboard?.writeText(result.summary ?? "")}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
-                >
-                  복사
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openSummaryWindow(result.summary ?? "", chatName)}
+                    className="rounded px-1.5 py-0.5 text-[11px] text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+                  >
+                    ↗ 새 창
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard?.writeText(result.summary ?? "")}
+                    className="rounded px-1.5 py-0.5 text-[11px] text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+                  >
+                    복사
+                  </button>
+                </div>
               </div>
-              <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-wa-text">
-                {result.summary}
+              <div className="max-h-[45vh] overflow-y-auto pr-1">
+                <MarkdownView text={result.summary ?? ""} />
               </div>
             </div>
           ) : result?.error ? (
@@ -915,6 +924,133 @@ function SummaryModal({
       </div>
     </button>
   );
+}
+
+// Lightweight markdown renderer for the AI summary (## / # headings,
+// - / * bullet lists, **bold**, paragraphs). Avoids a markdown-lib dependency.
+function renderInline(text: string, keyBase: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((p, i) => {
+    if (p.startsWith("**") && p.endsWith("**")) {
+      return <strong key={`${keyBase}-${i}`}>{p.slice(2, -2)}</strong>;
+    }
+    return <span key={`${keyBase}-${i}`}>{p}</span>;
+  });
+}
+
+function MarkdownView({ text }: { text: string }) {
+  const nodes: ReactNode[] = [];
+  let list: ReactNode[] = [];
+  const flush = () => {
+    if (list.length) {
+      nodes.push(
+        <ul
+          key={`ul-${nodes.length}`}
+          className="ml-1 list-disc space-y-1 pl-4 marker:text-wa-text-muted"
+        >
+          {list}
+        </ul>,
+      );
+      list = [];
+    }
+  };
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t) {
+      flush();
+      continue;
+    }
+    if (t.startsWith("## ")) {
+      flush();
+      nodes.push(
+        <h3 key={i} className="mt-3 text-[14px] font-semibold text-wa-green first:mt-0">
+          {renderInline(t.slice(3), `h${i}`)}
+        </h3>,
+      );
+    } else if (t.startsWith("# ")) {
+      flush();
+      nodes.push(
+        <h2 key={i} className="mt-3 text-[15px] font-bold text-wa-text first:mt-0">
+          {renderInline(t.slice(2), `h${i}`)}
+        </h2>,
+      );
+    } else if (t.startsWith("- ") || t.startsWith("* ")) {
+      list.push(
+        <li key={i} className="text-[13px] leading-relaxed text-wa-text">
+          {renderInline(t.replace(/^[-*]\s+/, ""), `li${i}`)}
+        </li>,
+      );
+    } else {
+      flush();
+      nodes.push(
+        <p key={i} className="text-[13px] leading-relaxed text-wa-text">
+          {renderInline(t, `p${i}`)}
+        </p>,
+      );
+    }
+  }
+  flush();
+  return <div className="space-y-1.5">{nodes}</div>;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function inlineHtml(s: string): string {
+  return escapeHtml(s).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function markdownToHtml(md: string): string {
+  let html = "";
+  let inList = false;
+  const closeList = () => {
+    if (inList) {
+      html += "</ul>";
+      inList = false;
+    }
+  };
+  for (const line of md.split("\n")) {
+    const t = line.trim();
+    if (!t) {
+      closeList();
+    } else if (t.startsWith("## ")) {
+      closeList();
+      html += `<h2>${inlineHtml(t.slice(3))}</h2>`;
+    } else if (t.startsWith("# ")) {
+      closeList();
+      html += `<h1>${inlineHtml(t.slice(2))}</h1>`;
+    } else if (t.startsWith("- ") || t.startsWith("* ")) {
+      if (!inList) {
+        html += "<ul>";
+        inList = true;
+      }
+      html += `<li>${inlineHtml(t.replace(/^[-*]\s+/, ""))}</li>`;
+    } else {
+      closeList();
+      html += `<p>${inlineHtml(t)}</p>`;
+    }
+  }
+  closeList();
+  return html;
+}
+
+// Open the summary as a clean standalone page in a new tab (easy to read,
+// print, or save). Blob URL — no server round-trip.
+function openSummaryWindow(markdown: string, title: string) {
+  const doc = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} — AI 요약</title><style>
+body{margin:0;background:#0b141a;color:#e9edef;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Pretendard',sans-serif;line-height:1.65}
+.wrap{max-width:760px;margin:0 auto;padding:44px 24px}
+.head{border-bottom:1px solid #2a3942;padding-bottom:14px;margin-bottom:22px}
+h1{font-size:22px;margin:0}h2{font-size:17px;margin:26px 0 8px;color:#00a884}
+p{margin:8px 0;font-size:15px}ul{margin:8px 0;padding-left:22px}li{margin:5px 0;font-size:15px}
+.meta{color:#8696a0;font-size:12px;margin-top:4px}
+@media print{body{background:#fff;color:#111}h2{color:#067a5b}}
+</style></head><body><div class="wrap"><div class="head"><h1>✨ ${escapeHtml(title)} 요약</h1><div class="meta">${escapeHtml(new Date().toLocaleString("ko-KR"))}</div></div>${markdownToHtml(markdown)}</div></body></html>`;
+  const blob = new Blob([doc], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function DropOverlay() {
