@@ -1,5 +1,6 @@
 "use client";
 
+import type { SummaryResult } from "@/lib/socket/events";
 import type {
   ChatInfo,
   MessageItem,
@@ -25,6 +26,7 @@ export function ChatWindow({
   onForward,
   onScheduleMessage,
   onSetAlias,
+  onSummarize,
 }: {
   chat: ChatInfo;
   messages: MessageItem[];
@@ -43,6 +45,11 @@ export function ChatWindow({
   onForward: (messageId: string) => void;
   onScheduleMessage: (text: string, sendAt: number) => void;
   onSetAlias: (name: string) => void;
+  onSummarize: (
+    from: number | undefined,
+    to: number | undefined,
+    password: string,
+  ) => Promise<SummaryResult>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -59,6 +66,7 @@ export function ChatWindow({
   const [searchQuery, setSearchQuery] = useState("");
   const [matchIdx, setMatchIdx] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [aliasOpen, setAliasOpen] = useState(false);
   const isDragging = dragDepth > 0;
 
@@ -403,6 +411,28 @@ export function ChatWindow({
             />
           </svg>
         </button>
+        <button
+          type="button"
+          onClick={() => setSummaryOpen(true)}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-wa-text-muted transition-colors hover:bg-wa-panel-hover hover:text-wa-text"
+          title="AI 요약"
+          aria-label="AI 요약"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 3.5 13.8 8 18 9.8 13.8 11.6 12 16l-1.8-4.4L6 9.8 10.2 8 12 3.5Z"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M18 14.5l.8 1.9 1.9.8-1.9.8L18 20l-.8-2-1.9-.8 1.9-.8.8-1.9Z"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
       </div>
 
       {searchOpen ? (
@@ -529,6 +559,13 @@ export function ChatWindow({
             exportChat(fromMs, toMs);
             setExportOpen(false);
           }}
+        />
+      ) : null}
+      {summaryOpen ? (
+        <SummaryModal
+          chatName={chat.name}
+          onSummarize={onSummarize}
+          onClose={() => setSummaryOpen(false)}
         />
       ) : null}
       {aliasOpen ? (
@@ -722,6 +759,158 @@ function ExportModal({
           >
             .txt 다운로드
           </button>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function SummaryModal({
+  chatName,
+  onSummarize,
+  onClose,
+}: {
+  chatName: string;
+  onSummarize: (
+    from: number | undefined,
+    to: number | undefined,
+    password: string,
+  ) => Promise<SummaryResult>;
+  onClose: () => void;
+}) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<SummaryResult | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function run() {
+    if (loading) return;
+    if (!password.trim()) {
+      setResult({ ok: false, error: "비밀번호를 입력하세요." });
+      return;
+    }
+    const fromMs = from ? new Date(`${from}T00:00:00`).getTime() : undefined;
+    const toMs = to ? new Date(`${to}T23:59:59`).getTime() : undefined;
+    setLoading(true);
+    setResult(null);
+    try {
+      setResult(await onSummarize(fromMs, toMs, password.trim()));
+    } catch (err) {
+      setResult({ ok: false, error: String(err) });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label="배경 클릭으로 닫기"
+      className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
+          <h2 className="text-[15px] font-semibold text-wa-text">✨ AI 대화 요약</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+            aria-label="닫기"
+          >
+            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path
+                d="m3 3 6 6M9 3l-6 6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">
+          <p className="mb-3 text-[12px] text-wa-text-muted">
+            <span className="text-wa-text">{chatName}</span> · 기간을 비우면 받은 전체를 요약합니다.
+            (앱이 받은 범위 내)
+          </p>
+          <div className="flex items-center gap-2">
+            <label className="flex-1 text-[12px] text-wa-text">
+              시작
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="mt-1 w-full rounded-md bg-wa-panel-soft px-2 py-1.5 text-[13px] text-wa-text outline-none [color-scheme:dark] focus:ring-1 focus:ring-wa-green/60"
+              />
+            </label>
+            <label className="flex-1 text-[12px] text-wa-text">
+              끝
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="mt-1 w-full rounded-md bg-wa-panel-soft px-2 py-1.5 text-[13px] text-wa-text outline-none [color-scheme:dark] focus:ring-1 focus:ring-wa-green/60"
+              />
+            </label>
+          </div>
+          <label className="mt-3 block text-[12px] text-wa-text">
+            비밀번호
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") run();
+              }}
+              placeholder="요약 비밀번호"
+              className="mt-1 w-full rounded-md bg-wa-panel-soft px-2 py-1.5 text-[13px] text-wa-text outline-none focus:ring-1 focus:ring-wa-green/60"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={run}
+            disabled={loading}
+            className="mt-4 w-full rounded-md bg-wa-green py-2 text-[13px] font-medium text-white hover:bg-wa-green-soft disabled:opacity-60"
+          >
+            {loading ? "요약 중… (수십 초 걸릴 수 있어요)" : "AI로 요약하기"}
+          </button>
+          {result?.ok ? (
+            <div className="mt-4 rounded-lg border border-wa-border bg-wa-bg p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] text-wa-text-muted">
+                  메시지 {result.meta?.messageCount ?? 0}개 · 이미지 {result.meta?.imageCount ?? 0}
+                  장
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(result.summary ?? "")}
+                  className="rounded px-1.5 py-0.5 text-[11px] text-wa-text-muted hover:bg-wa-panel-hover hover:text-wa-text"
+                >
+                  복사
+                </button>
+              </div>
+              <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-wa-text">
+                {result.summary}
+              </div>
+            </div>
+          ) : result?.error ? (
+            <p className="mt-3 text-[12px] text-red-400">{result.error}</p>
+          ) : null}
         </div>
       </div>
     </button>

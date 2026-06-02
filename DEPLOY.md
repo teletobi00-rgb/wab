@@ -84,11 +84,27 @@ $env:WAB_ACCESS_TOKEN="test123"; npm run build; npm run start
 
 ---
 
+## 5. AI 대화 요약 (선택)
+
+채팅을 기간별로 Gemini AI가 요약해주는 기능. 쓰려면:
+
+1. <https://aistudio.google.com/apikey> 에서 **Gemini API 키** 발급 (무료 등급 있음).
+2. Railway **Variables** 탭에 추가:
+   - `WAB_GEMINI_API_KEY` = 발급받은 키
+   - (선택) `WAB_SUMMARY_PASSWORD` = 요약 비밀번호 (기본 `1812`)
+3. 앱에서 채팅 열고 헤더의 **✨ 버튼** → 기간·비밀번호 입력 → 요약.
+
+> ⚠️ API 키는 **서버 환경변수에만** 두세요. 코드에 하드코딩하면 공개 repo에
+> 노출되어 누구나 당신의 키로 호출 → 요금이 청구될 수 있습니다.
+
 ## 환경변수 요약
 
 | 변수 | 용도 | 기본값 |
 |------|------|--------|
 | `WAB_ACCESS_TOKEN` | 접속 토큰(필수, 클라우드) | (없으면 게이트 비활성=로컬 모드) |
+| `WAB_GEMINI_API_KEY` | AI 요약용 Gemini 키 | (없으면 요약 비활성) |
+| `WAB_SUMMARY_PASSWORD` | AI 요약 비밀번호 | `1812` |
+| `WAB_GEMINI_MODEL` | Gemini 모델(선택) | `gemini-2.5-flash` |
 | `WAB_BIND_HOST` | 바인드 주소 | 토큰 있으면 `0.0.0.0`, 없으면 `127.0.0.1` |
 | `PORT` | 포트 | `3000` (플랫폼이 주입) |
 | `WAB_AUTH_DIR` | Baileys 세션 | `/data/auth` (Dockerfile) |

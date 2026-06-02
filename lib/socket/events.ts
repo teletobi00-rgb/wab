@@ -21,6 +21,13 @@ export type SendMediaPayload = {
 
 export type SendAck = { ok: boolean; id?: string };
 
+export type SummaryResult = {
+  ok: boolean;
+  summary?: string;
+  error?: string;
+  meta?: { messageCount: number; imageCount: number };
+};
+
 export type ServerToClientEvents = {
   qr: (data: { qr: string }) => void;
   status: (status: Status) => void;
@@ -55,5 +62,9 @@ export type ClientToServerEvents = {
   "check-number": (data: { phone: string }, ack: (result: CheckNumberResult) => void) => void;
   "start-chat": (data: { jid: string }, ack: (chat: ChatInfo | null) => void) => void;
   "set-alias": (data: { jid: string; name: string }) => void;
+  "summarize-chat": (
+    data: { jid: string; from?: number; to?: number; password: string },
+    ack: (res: SummaryResult) => void,
+  ) => void;
   logout: () => void;
 };

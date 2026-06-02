@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "./socket/events";
+import { type GeminiPart, geminiConfigured, generateContent } from "./ai/gemini";
+import type { ClientToServerEvents, ServerToClientEvents, SummaryResult } from "./socket/events";
 import { type WhatsAppClient, initWhatsApp } from "./whatsapp/client";
 
 const MEDIA_MAX_BYTES = 100 * 1024 * 1024;
@@ -63,6 +64,108 @@ async function warnIfVolumeMissing(): Promise<void> {
   } catch (err) {
     slog(`volume check skipped: ${String(err)}`);
   }
+}
+
+// Collect a chat's messages (and image attachments) in the given time range and
+// ask Gemini for a Korean summary. Runs server-side so the API key and media
+// bytes never reach the browser. Range is in epoch milliseconds (optional).
+async function summarizeChat(
+  wa: WhatsAppClient,
+  jid: string,
+  from?: number,
+  to?: number,
+): Promise<SummaryResult> {
+  const MAX_IMAGES = 20;
+  const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+  const MAX_TRANSCRIPT_CHARS = 100_000;
+
+  const inRange = wa.loadMessages(jid, 1000).filter((m) => {
+    const ms = m.timestamp * 1000;
+    if (from && ms < from) return false;
+    if (to && ms > to) return false;
+    return true;
+  });
+
+  const lines: string[] = [];
+  const imageParts: GeminiPart[] = [];
+  let imageCount = 0;
+
+  for (const m of inRange) {
+    const who = m.fromMe ? "나" : m.pushName || "상대";
+    const time = new Date(m.timestamp * 1000).toLocaleString("ko-KR");
+    if (m.deleted) {
+      lines.push(`[${time}] ${who}: (삭제된 메시지)`);
+      continue;
+    }
+    if (m.type === "image" && m.media?.url && imageCount < MAX_IMAGES) {
+      const id = m.media.url.split("/media/")[1]?.split("?")[0];
+      const entry = id ? wa.getMediaEntry(id) : undefined;
+      if (entry && entry.size <= MAX_IMAGE_BYTES) {
+        try {
+          const buf = await fs.readFile(entry.filePath);
+          imageParts.push({
+            inlineData: { mimeType: entry.mimeType, data: buf.toString("base64") },
+          });
+          imageCount++;
+        } catch {
+          // unreadable media — skip the attachment, keep the text marker
+        }
+      }
+      lines.push(`[${time}] ${who}: [이미지${m.text ? ` - ${m.text}` : ""}]`);
+      continue;
+    }
+    if (m.type === "document") {
+      lines.push(
+        `[${time}] ${who}: [문서: ${m.media?.fileName ?? "파일"}${m.text ? ` - ${m.text}` : ""}]`,
+      );
+      continue;
+    }
+    if (m.type === "video") {
+      lines.push(`[${time}] ${who}: [영상${m.text ? ` - ${m.text}` : ""}]`);
+      continue;
+    }
+    if (m.type === "voice" || m.type === "audio") {
+      lines.push(`[${time}] ${who}: [음성 메시지]`);
+      continue;
+    }
+    if (m.text) lines.push(`[${time}] ${who}: ${m.text}`);
+  }
+
+  if (lines.length === 0) {
+    return {
+      ok: false,
+      error: "선택한 기간에 요약할 메시지가 없습니다. (앱이 받은 범위 내에서만 요약됩니다)",
+    };
+  }
+
+  let transcript = lines.join("\n");
+  if (transcript.length > MAX_TRANSCRIPT_CHARS) {
+    transcript = `(앞부분 생략)\n${transcript.slice(-MAX_TRANSCRIPT_CHARS)}`;
+  }
+
+  const prompt = `당신은 채팅 대화를 분석하는 비서입니다. 아래 대화 기록(과 첨부된 이미지)을 한국어로 요약하세요.
+
+다음 형식을 사용하세요:
+## 한줄 요약
+(전체 대화를 한 문장으로)
+
+## 핵심 내용
+- (주요 논의/사건을 불릿으로 정리)
+
+## 결정사항 / 할 일
+- (있으면 정리, 없으면 "없음")
+
+## 특이사항
+- (중요한 약속·날짜·금액·연락처·링크 등이 있으면. 없으면 이 섹션 생략)
+
+첨부된 이미지가 있으면 그 내용도 요약에 반영하세요.
+
+--- 대화 기록 ---
+${transcript}`;
+
+  const parts: GeminiPart[] = [{ text: prompt }, ...imageParts];
+  const summary = await generateContent(parts);
+  return { ok: true, summary, meta: { messageCount: lines.length, imageCount } };
 }
 
 export type StartServerOptions = {
@@ -324,6 +427,33 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
         wa?.setAlias(jid, name);
       } catch (err) {
         console.error("set-alias failed", err);
+      }
+    });
+
+    socket.on("summarize-chat", async ({ jid, from, to, password }, ack) => {
+      try {
+        const expected = process.env.WAB_SUMMARY_PASSWORD?.trim() || "1812";
+        if (password !== expected) {
+          ack({ ok: false, error: "비밀번호가 올바르지 않습니다." });
+          return;
+        }
+        if (!geminiConfigured()) {
+          ack({
+            ok: false,
+            error:
+              "AI 요약이 설정되지 않았습니다. 서버에 WAB_GEMINI_API_KEY 환경변수를 설정하세요.",
+          });
+          return;
+        }
+        if (!wa) {
+          ack({ ok: false, error: "서버가 아직 준비되지 않았습니다." });
+          return;
+        }
+        const result = await summarizeChat(wa, jid, from, to);
+        ack(result);
+      } catch (err) {
+        console.error("summarize-chat failed", err);
+        ack({ ok: false, error: `요약 실패: ${(err as Error)?.message ?? String(err)}` });
       }
     });
 

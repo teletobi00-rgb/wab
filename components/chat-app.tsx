@@ -348,6 +348,19 @@ export function ChatApp() {
               socket?.emit("schedule-message", { jid: selectedChat.jid, text, sendAt })
             }
             onSetAlias={(name) => socket?.emit("set-alias", { jid: selectedChat.jid, name })}
+            onSummarize={(from, to, password) =>
+              new Promise((resolve) => {
+                if (!socket) {
+                  resolve({ ok: false, error: "서버에 연결되어 있지 않습니다." });
+                  return;
+                }
+                socket.emit(
+                  "summarize-chat",
+                  { jid: selectedChat.jid, from, to, password },
+                  resolve,
+                );
+              })
+            }
           />
         ) : (
           <EmptyState />
