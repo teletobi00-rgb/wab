@@ -279,7 +279,7 @@ export function ChatApp() {
           onToggleMute={toggleMute}
         />
       </aside>
-      <main className="flex flex-1 flex-col bg-wa-bg">
+      <main className="flex min-w-0 flex-1 flex-col bg-wa-bg">
         {selectedChat ? (
           <ChatWindow
             key={selectedChat.jid}
