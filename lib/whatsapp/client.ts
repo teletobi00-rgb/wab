@@ -58,7 +58,9 @@ type MediaCacheEntry = {
 const RAW_MESSAGE_CAP = 1000; // originals kept only for retry-receipt resends
 const MESSAGES_PER_CHAT_CAP = 500; // rendered history per conversation
 // Disk + in-memory cap for the media cache, enforced on boot AND at runtime.
-const MEDIA_CACHE_MAX_BYTES = 500 * 1024 * 1024; // 500 MB
+// Default 350MB to stay safely under a 500MB Railway volume (which also holds
+// the auth session). Override with WAB_MEDIA_CACHE_MB if the volume is larger.
+const MEDIA_CACHE_MAX_BYTES = (Number(process.env.WAB_MEDIA_CACHE_MB) || 350) * 1024 * 1024;
 // Messages older than this relative to the connection time are treated as
 // history-sync replay and hidden from the UI. Offline-delivered messages
 // (type "append") that arrived while we were briefly disconnected are newer

@@ -105,6 +105,7 @@ $env:WAB_ACCESS_TOKEN="test123"; npm run build; npm run start
 | `WAB_GEMINI_API_KEY` | AI 요약용 Gemini 키 | (없으면 요약 비활성) |
 | `WAB_SUMMARY_PASSWORD` | AI 요약 비밀번호 | `1812` |
 | `WAB_GEMINI_MODEL` | Gemini 모델(선택) | `gemini-2.5-flash` |
+| `WAB_MEDIA_CACHE_MB` | 미디어 캐시 상한(MB). 볼륨보다 작게 | `350` |
 | `WAB_BIND_HOST` | 바인드 주소 | 토큰 있으면 `0.0.0.0`, 없으면 `127.0.0.1` |
 | `PORT` | 포트 | `3000` (플랫폼이 주입) |
 | `WAB_AUTH_DIR` | Baileys 세션 | `/data/auth` (Dockerfile) |
