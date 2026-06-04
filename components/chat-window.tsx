@@ -1415,6 +1415,13 @@ function MessageContent({
     return <MediaContent message={message} url={message.media.url} onOpenImage={onOpenImage} />;
   }
   if (isMediaType(message.type)) {
+    if (message.mediaFailed) {
+      return (
+        <div className="italic text-wa-text-muted">
+          ⚠️ {mediaPlaceholder(message)}를 불러올 수 없습니다
+        </div>
+      );
+    }
     return (
       <div className="italic text-wa-text-muted">⏳ {mediaPlaceholder(message)} 로드 중...</div>
     );

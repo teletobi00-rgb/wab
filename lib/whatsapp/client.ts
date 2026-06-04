@@ -802,16 +802,32 @@ export async function initWhatsApp(io: IO) {
     if (needsDownload) scheduleMediaDownload(m, item.jid);
   }
 
-  function scheduleMediaDownload(m: WAMessage, jid: string) {
+  function scheduleMediaDownload(m: WAMessage, jid: string, attempt = 0) {
     downloadMedia(m)
       .then((entry) => {
-        if (!entry || !m.key.id) return;
+        if (!m.key.id) return;
         const list = messages.get(jid);
         if (!list) return;
         const idx = list.findIndex((x) => x.id === m.key.id);
-        if (idx < 0) return;
+        if (idx < 0) return; // message evicted from the cap — nothing to update
+        if (!entry) {
+          // Media often isn't downloadable in the first moments after a
+          // reconnect (session still settling, offline backlog being replayed).
+          // Retry with backoff, then mark as failed so the UI stops showing an
+          // infinite "로드 중".
+          if (attempt < 4) {
+            setTimeout(() => scheduleMediaDownload(m, jid, attempt + 1), 3000 * (attempt + 1));
+            return;
+          }
+          logger.warn({ id: m.key.id, jid }, "media download gave up after retries");
+          const failed = { ...list[idx], mediaFailed: true };
+          list[idx] = failed;
+          io.emit("message-upsert", { jid, message: failed });
+          return;
+        }
         const merged = {
           ...list[idx],
+          mediaFailed: false,
           media: {
             url: `/media/${m.key.id}`,
             mimeType: entry.mimeType,

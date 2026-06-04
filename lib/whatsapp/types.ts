@@ -69,6 +69,9 @@ export type MessageItem = {
   quoted?: QuotedInfo;
   reactions?: Reaction[];
   deleted?: boolean;
+  // Set true when the server gave up downloading the attachment (after retries)
+  // so the UI can stop showing an infinite "로드 중".
+  mediaFailed?: boolean;
 };
 
 export type PresenceState = "available" | "composing" | "recording" | "paused" | "unavailable";
