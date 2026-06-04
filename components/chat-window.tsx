@@ -83,12 +83,12 @@ export function ChatWindow({
   }
 
   // When the query changes, jump to the last (most recent) match.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run only when the search query changes
   useEffect(() => {
     if (matchIds.length === 0) return;
     const last = matchIds.length - 1;
     setMatchIdx(last);
     scrollToMessage(matchIds[last]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
   function stepMatch(delta: number) {
@@ -142,6 +142,7 @@ export function ChatWindow({
   }
 
   // Scroll on chat switch / new messages.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll helper reads refs only
   useEffect(() => {
     const jidChanged = lastJidRef.current !== chat.jid;
     lastJidRef.current = chat.jid;
@@ -181,6 +182,7 @@ export function ChatWindow({
     };
   }, [messages.length === 0]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chat change resets all interaction state
   useEffect(() => {
     setDragDepth(0);
     setReplyTo(null);
@@ -194,7 +196,6 @@ export function ChatWindow({
     setSearchOpen(false);
     setSearchQuery("");
     setMatchIdx(0);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: chat change resets all interaction state
   }, [chat.jid]);
 
   const clearPending = useCallback(() => {
@@ -437,9 +438,7 @@ export function ChatWindow({
 
       {searchOpen ? (
         <div className="flex items-center gap-2 border-b border-wa-border bg-wa-panel px-3 py-2">
-          {/* biome-ignore lint/a11y/noAutofocus: search opens for this input */}
           <input
-            autoFocus
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -602,21 +601,17 @@ function AliasModal({
   }, [onClose]);
 
   return (
-    // Backdrop is a div (not a button) so typing a space inside the input
-    // doesn't trigger native button activation and close the modal. Escape
-    // closes it (handler above); click-to-close is mouse convenience.
-    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-close, Escape handles keyboard
     <div
-      role="presentation"
       className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
-        className="w-full max-w-sm overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        className="relative m-0 w-full max-w-sm overflow-hidden rounded-2xl border border-wa-border bg-wa-panel p-0 text-left shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
           <h2 className="text-[15px] font-semibold text-wa-text">이름 지정</h2>
@@ -640,9 +635,7 @@ function AliasModal({
           <p className="mb-3 text-[12px] text-wa-text-muted">
             이 대화에 표시할 이름을 직접 지정합니다. 기기에 저장되어 다시 로그인해도 유지됩니다.
           </p>
-          {/* biome-ignore lint/a11y/noAutofocus: modal opens for this input */}
           <input
-            autoFocus
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -670,7 +663,7 @@ function AliasModal({
             </button>
           </div>
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }
@@ -700,18 +693,17 @@ function ExportModal({
   }
 
   return (
-    <button
-      type="button"
-      aria-label="배경 클릭으로 닫기"
+    <div
       className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
-        className="w-full max-w-sm overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        className="relative m-0 w-full max-w-sm overflow-hidden rounded-2xl border border-wa-border bg-wa-panel p-0 text-left shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
           <h2 className="text-[15px] font-semibold text-wa-text">대화 내보내기</h2>
@@ -763,8 +755,8 @@ function ExportModal({
             .txt 다운로드
           </button>
         </div>
-      </div>
-    </button>
+      </dialog>
+    </div>
   );
 }
 
@@ -815,18 +807,17 @@ function SummaryModal({
   }
 
   return (
-    <button
-      type="button"
-      aria-label="배경 클릭으로 닫기"
+    <div
       className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
-        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        className="relative m-0 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-wa-border bg-wa-panel p-0 text-left shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
           <h2 className="text-[15px] font-semibold text-wa-text">✨ AI 대화 요약</h2>
@@ -924,19 +915,23 @@ function SummaryModal({
             <p className="mt-3 text-[12px] text-red-400">{result.error}</p>
           ) : null}
         </div>
-      </div>
-    </button>
+      </dialog>
+    </div>
   );
 }
 
 // Lightweight markdown renderer for the AI summary (## / # headings,
 // - / * bullet lists, **bold**, paragraphs). Avoids a markdown-lib dependency.
 function renderInline(text: string, keyBase: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((p, i) => {
+  let offset = 0;
+  let ordinal = 0;
+  return text.split(/(\*\*[^*]+\*\*)/g).map((p) => {
+    const key = `${keyBase}-${offset}-${ordinal++}`;
+    offset += p.length;
     if (p.startsWith("**") && p.endsWith("**")) {
-      return <strong key={`${keyBase}-${i}`}>{p.slice(2, -2)}</strong>;
+      return <strong key={key}>{p.slice(2, -2)}</strong>;
     }
-    return <span key={`${keyBase}-${i}`}>{p}</span>;
+    return <span key={key}>{p}</span>;
   });
 }
 
@@ -1375,11 +1370,14 @@ const TEXT_CLASS = "whitespace-pre-wrap break-words leading-relaxed [overflow-wr
 // Split text on URLs and render them as external links (opened in the system
 // browser via the window-open handler in the Electron main process).
 function linkify(text: string) {
-  return text.split(/(\bhttps?:\/\/[^\s]+)/gi).map((part, i) =>
-    /^https?:\/\//i.test(part) ? (
-      // biome-ignore lint/suspicious/noArrayIndexKey: split output is positional
+  let offset = 0;
+  let ordinal = 0;
+  return text.split(/(\bhttps?:\/\/[^\s]+)/gi).map((part) => {
+    const key = `part-${offset}-${ordinal++}`;
+    offset += part.length;
+    return /^https?:\/\//i.test(part) ? (
       <a
-        key={i}
+        key={key}
         href={part}
         target="_blank"
         rel="noopener noreferrer"
@@ -1390,8 +1388,8 @@ function linkify(text: string) {
       </a>
     ) : (
       part
-    ),
-  );
+    );
+  });
 }
 
 function LinkifiedText({ text, className }: { text: string; className?: string }) {

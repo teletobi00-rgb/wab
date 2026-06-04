@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
+import { BrowserWindow, Menu, Tray, app, dialog, ipcMain, nativeImage, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 
 const PRODUCT = "WAB";
@@ -66,7 +66,10 @@ function setUnreadBadge(count: number) {
     if (mainWindow) {
       if (count > 0) {
         try {
-          mainWindow.setOverlayIcon(nativeImage.createFromPath(badgeIconPath()), `안 읽음 ${count}`);
+          mainWindow.setOverlayIcon(
+            nativeImage.createFromPath(badgeIconPath()),
+            `안 읽음 ${count}`,
+          );
         } catch {
           // overlay unsupported / icon missing — ignore
         }
@@ -216,7 +219,30 @@ async function createMainWindow(url: string) {
   mainWindow.show();
 
   mainWindow.webContents.setWindowOpenHandler(({ url: openUrl }: { url: string }) => {
-    shell.openExternal(openUrl);
+    try {
+      const parsed = new URL(openUrl);
+      if (parsed.protocol === "blob:") {
+        return {
+          action: "allow" as const,
+          overrideBrowserWindowOptions: {
+            autoHideMenuBar: true,
+            backgroundColor: "#0b141a",
+            webPreferences: {
+              nodeIntegration: false,
+              contextIsolation: true,
+              sandbox: true,
+            },
+          },
+        };
+      }
+      if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+        shell.openExternal(openUrl).catch((err) => diagLog(`openExternal failed: ${String(err)}`));
+      } else {
+        diagLog(`blocked window.open URL: ${openUrl}`);
+      }
+    } catch (err) {
+      diagLog(`invalid window.open URL blocked: ${openUrl} (${String(err)})`);
+    }
     return { action: "deny" as const };
   });
 

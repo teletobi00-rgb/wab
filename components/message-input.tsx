@@ -31,6 +31,7 @@ export function MessageInput({
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-grow the textarea with its content, up to the max-height cap.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: text changes must resize the textarea
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
@@ -328,10 +329,7 @@ function TemplatePopup({
           </div>
         ) : (
           templates.map((t, i) => (
-            <div
-              key={`${t}-${i}`}
-              className="group flex items-center gap-1 px-2 hover:bg-wa-panel-hover"
-            >
+            <div key={t} className="group flex items-center gap-1 px-2 hover:bg-wa-panel-hover">
               <button
                 type="button"
                 onClick={() => onPick(t)}

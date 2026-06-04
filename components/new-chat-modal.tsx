@@ -60,18 +60,17 @@ export function NewChatModal({
   }, [contacts, query]);
 
   return (
-    <button
-      type="button"
-      aria-label="배경 클릭으로 닫기"
+    <div
       className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        className="relative m-0 w-full max-w-md overflow-hidden rounded-2xl border border-wa-border bg-wa-panel p-0 text-left shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
           <h2 className="text-[15px] font-semibold text-wa-text">새 채팅 시작</h2>
@@ -93,11 +92,15 @@ export function NewChatModal({
         </div>
 
         <form onSubmit={handlePhoneSubmit} className="border-b border-wa-border px-5 py-4">
-          <label className="text-[11px] uppercase tracking-wider text-wa-text-muted">
+          <label
+            htmlFor="new-chat-phone"
+            className="text-[11px] uppercase tracking-wider text-wa-text-muted"
+          >
             전화번호로 시작
           </label>
           <div className="mt-2 flex gap-2">
             <input
+              id="new-chat-phone"
               type="tel"
               value={phone}
               onChange={(e) => {
@@ -122,10 +125,14 @@ export function NewChatModal({
         </form>
 
         <div className="border-b border-wa-border px-5 py-3">
-          <label className="text-[11px] uppercase tracking-wider text-wa-text-muted">
+          <label
+            htmlFor="new-chat-contact-query"
+            className="text-[11px] uppercase tracking-wider text-wa-text-muted"
+          >
             연락처에서 선택
           </label>
           <input
+            id="new-chat-contact-query"
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -163,8 +170,8 @@ export function NewChatModal({
             ))
           )}
         </div>
-      </div>
-    </button>
+      </dialog>
+    </div>
   );
 }
 

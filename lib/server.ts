@@ -37,10 +37,18 @@ function getCookie(header: string | undefined, name: string): string | null {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
     if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
+      return safeDecodeURIComponent(part.slice(eq + 1).trim());
     }
   }
   return null;
+}
+
+function safeDecodeURIComponent(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
 // Warn loudly in cloud mode if /data isn't an actual mounted volume. Baileys
@@ -242,7 +250,13 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
           return;
         }
       }
-      const id = decodeURIComponent(req.url.slice("/media/".length).split("?")[0] ?? "");
+      const encodedId = req.url.slice("/media/".length).split("?")[0] ?? "";
+      const id = safeDecodeURIComponent(encodedId);
+      if (id === null) {
+        res.statusCode = 400;
+        res.end("Bad request");
+        return;
+      }
       const entry = wa.getMediaEntry(id);
       if (!entry) {
         res.statusCode = 404;

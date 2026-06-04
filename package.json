@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "next build",
-    "start": "NODE_ENV=production tsx server.ts",
-    "check": "biome check --write .",
+    "start": "cross-env NODE_ENV=production tsx server.ts",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
     "icons": "node scripts/make-icons.mjs",
     "fix:wincodesign": "node scripts/fix-wincodesign.mjs",
     "compile:electron": "tsc --project electron/tsconfig.json",
@@ -77,17 +78,13 @@
         "to": "badge.png"
       }
     ],
-    "asarUnpack": [
-      "node_modules/@whiskeysockets/baileys/**/*"
-    ],
+    "asarUnpack": ["node_modules/@whiskeysockets/baileys/**/*"],
     "win": {
       "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "executableName": "WAB",

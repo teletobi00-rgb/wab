@@ -4,7 +4,12 @@
 const { io } = require("socket.io-client");
 const URL = process.argv[2] || "http://localhost:3003";
 const TOKEN = process.argv[3] || "tok";
-const s = io(URL, { auth: { token: TOKEN }, transports: ["polling", "websocket"], reconnection: false, timeout: 8000 });
+const s = io(URL, {
+  auth: { token: TOKEN },
+  transports: ["polling", "websocket"],
+  reconnection: false,
+  timeout: 8000,
+});
 
 s.on("connect", () => {
   s.emit("summarize-chat", { jid: "x@s.whatsapp.net", password: "0000" }, (wrong) => {

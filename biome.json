@@ -3,7 +3,17 @@
   "vcs": { "enabled": false, "clientKind": "git", "useIgnoreFile": false },
   "files": {
     "ignoreUnknown": false,
-    "ignore": ["node_modules", ".next", "auth_info_baileys"]
+    "ignore": [
+      "node_modules",
+      ".next",
+      "dist",
+      "release",
+      "release2",
+      "build",
+      "auth_info_baileys",
+      "media_cache",
+      "tsconfig.tsbuildinfo"
+    ]
   },
   "formatter": {
     "enabled": true,

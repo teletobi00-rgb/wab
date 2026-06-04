@@ -16,12 +16,45 @@ function finish() {
   }
 }
 
-const noTok = io(URL, { auth: {}, transports: ["polling", "websocket"], reconnection: false, timeout: 6000 });
-noTok.on("connect", () => { results.noToken = "connected"; console.log("NO-TOKEN  -> connected (BAD: gate open)"); noTok.close(); finish(); });
-noTok.on("connect_error", (e) => { results.noToken = "rejected"; console.log("NO-TOKEN  -> rejected:", e.message); noTok.close(); finish(); });
+const noTok = io(URL, {
+  auth: {},
+  transports: ["polling", "websocket"],
+  reconnection: false,
+  timeout: 6000,
+});
+noTok.on("connect", () => {
+  results.noToken = "connected";
+  console.log("NO-TOKEN  -> connected (BAD: gate open)");
+  noTok.close();
+  finish();
+});
+noTok.on("connect_error", (e) => {
+  results.noToken = "rejected";
+  console.log("NO-TOKEN  -> rejected:", e.message);
+  noTok.close();
+  finish();
+});
 
-const okTok = io(URL, { auth: { token: TOKEN }, transports: ["polling", "websocket"], reconnection: false, timeout: 6000 });
-okTok.on("connect", () => { results.withToken = "connected"; console.log("WITH-TOKEN-> connected (GOOD)"); okTok.close(); finish(); });
-okTok.on("connect_error", (e) => { results.withToken = "rejected"; console.log("WITH-TOKEN-> rejected:", e.message, "(BAD)"); okTok.close(); finish(); });
+const okTok = io(URL, {
+  auth: { token: TOKEN },
+  transports: ["polling", "websocket"],
+  reconnection: false,
+  timeout: 6000,
+});
+okTok.on("connect", () => {
+  results.withToken = "connected";
+  console.log("WITH-TOKEN-> connected (GOOD)");
+  okTok.close();
+  finish();
+});
+okTok.on("connect_error", (e) => {
+  results.withToken = "rejected";
+  console.log("WITH-TOKEN-> rejected:", e.message, "(BAD)");
+  okTok.close();
+  finish();
+});
 
-setTimeout(() => { console.log("\nRESULT: FAIL ❌ timeout"); process.exit(1); }, 15000);
+setTimeout(() => {
+  console.log("\nRESULT: FAIL ❌ timeout");
+  process.exit(1);
+}, 15000);

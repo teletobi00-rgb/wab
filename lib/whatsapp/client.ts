@@ -267,7 +267,7 @@ export async function initWhatsApp(io: IO) {
     jid: string;
     text: string;
     sendAt: number;
-    timer: ReturnType<typeof setTimeout>;
+    timer?: ReturnType<typeof setTimeout>;
   };
   const scheduled = new Map<string, ScheduledEntry>();
   let scheduleCounter = 0;
@@ -566,7 +566,11 @@ export async function initWhatsApp(io: IO) {
       const phoneMsgs = messages.get(phone) ?? [];
       const seen = new Set<string>();
       const combined = [...phoneMsgs, ...lidMsgs.map((m) => ({ ...m, jid: phone }))]
-        .filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+        .filter((m) => {
+          if (seen.has(m.id)) return false;
+          seen.add(m.id);
+          return true;
+        })
         .sort((a, b) => a.timestamp - b.timestamp);
       messages.set(phone, combined);
     }
@@ -909,30 +913,53 @@ export async function initWhatsApp(io: IO) {
     io.emit("scheduled", listScheduled());
   }
 
+  const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+  const SCHEDULE_RETRY_MS = 30_000;
+
+  function armScheduled(entry: ScheduledEntry) {
+    const remaining = entry.sendAt - Date.now();
+    const delay = remaining > 0 ? Math.min(remaining, MAX_TIMEOUT_MS) : 0;
+    entry.timer = setTimeout(() => {
+      runScheduled(entry).catch((err) => {
+        console.error("scheduled send failed", err);
+        logger.warn({ id: entry.id, err: String(err) }, "scheduled send failed, retrying");
+        if (scheduled.has(entry.id)) {
+          entry.timer = setTimeout(() => armScheduled(entry), SCHEDULE_RETRY_MS);
+        }
+      });
+    }, delay);
+  }
+
+  async function runScheduled(entry: ScheduledEntry) {
+    if (!scheduled.has(entry.id)) return;
+    if (Date.now() < entry.sendAt) {
+      armScheduled(entry);
+      return;
+    }
+    if (!sock || status.state !== "connected") {
+      logger.warn({ id: entry.id, jid: entry.jid }, "scheduled send delayed: not connected");
+      entry.timer = setTimeout(() => armScheduled(entry), SCHEDULE_RETRY_MS);
+      return;
+    }
+
+    const sent = await sock.sendMessage(entry.jid, { text: entry.text });
+    if (sent?.key?.id) rawMessages.set(sent.key.id, sent);
+    scheduled.delete(entry.id);
+    emitScheduled();
+  }
+
   function scheduleMessage(jid: string, text: string, sendAt: number) {
     const id = `sched_${sendAt}_${scheduleCounter++}`;
-    // setTimeout caps at ~24.8 days (2^31 ms); clamp so we don't fire instantly.
-    const delay = Math.min(Math.max(0, sendAt - Date.now()), 2 ** 31 - 1);
-    const timer = setTimeout(async () => {
-      scheduled.delete(id);
-      try {
-        if (sock && status.state === "connected") {
-          const sent = await sock.sendMessage(jid, { text });
-          if (sent?.key?.id) rawMessages.set(sent.key.id, sent);
-        }
-      } catch (err) {
-        console.error("scheduled send failed", err);
-      }
-      emitScheduled();
-    }, delay);
-    scheduled.set(id, { id, jid, text, sendAt, timer });
+    const entry: ScheduledEntry = { id, jid, text, sendAt };
+    scheduled.set(id, entry);
+    armScheduled(entry);
     emitScheduled();
   }
 
   function cancelScheduled(id: string) {
     const s = scheduled.get(id);
     if (!s) return;
-    clearTimeout(s.timer);
+    if (s.timer) clearTimeout(s.timer);
     scheduled.delete(id);
     emitScheduled();
   }
@@ -1411,10 +1438,16 @@ export async function initWhatsApp(io: IO) {
       try {
         if (forEveryone) {
           const raw = rawMessages.get(messageId);
-          if (raw) await sock.sendMessage(jid, { delete: raw.key });
+          if (!raw?.key?.remoteJid) {
+            logger.warn({ jid, messageId }, "delete for everyone skipped: raw message missing");
+            return;
+          }
+          await sock.sendMessage(raw.key.remoteJid, { delete: raw.key });
+          markDeleted(canonicalJid(raw.key.remoteJid), messageId);
+          return;
         }
         // "delete for me" (and the local echo of "for everyone") just hide it.
-        markDeleted(jid, messageId);
+        markDeleted(canonicalJid(jid), messageId);
       } catch (err) {
         console.error("deleteMessage failed", err);
       }

@@ -35,18 +35,17 @@ export function ForwardModal({
   }, [chats, query]);
 
   return (
-    <button
-      type="button"
-      aria-label="배경 클릭으로 닫기"
+    <div
       className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
-      onClick={onClose}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      <div
-        role="dialog"
+      <dialog
+        open
         aria-modal="true"
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-wa-border bg-wa-panel text-left shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        className="relative m-0 w-full max-w-md overflow-hidden rounded-2xl border border-wa-border bg-wa-panel p-0 text-left shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-wa-border bg-wa-panel-soft px-5 py-3.5">
           <h2 className="text-[15px] font-semibold text-wa-text">전달할 대화 선택</h2>
@@ -94,7 +93,7 @@ export function ForwardModal({
             ))
           )}
         </div>
-      </div>
-    </button>
+      </dialog>
+    </div>
   );
 }

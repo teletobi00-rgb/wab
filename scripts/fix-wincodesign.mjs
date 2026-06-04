@@ -36,17 +36,13 @@ async function main() {
 
   const sevenZip = path.resolve("node_modules", "7zip-bin", "win", "x64", "7za.exe");
   if (!existsSync(sevenZip)) {
-    throw new Error(
-      `7za.exe not found at ${sevenZip}. Run \`npm install\` first.`,
-    );
+    throw new Error(`7za.exe not found at ${sevenZip}. Run \`npm install\` first.`);
   }
 
   console.log(`Extracting (excluding darwin/ — Windows builds don't need macOS tools)...`);
-  const result = spawnSync(
-    sevenZip,
-    ["x", "-y", "-aoa", `-o${targetDir}`, zipPath, "-xr!darwin"],
-    { stdio: "inherit" },
-  );
+  const result = spawnSync(sevenZip, ["x", "-y", "-aoa", `-o${targetDir}`, zipPath, "-xr!darwin"], {
+    stdio: "inherit",
+  });
 
   if (!existsSync(marker)) {
     console.error(`\nExtraction failed. Expected file not found: ${marker}`);

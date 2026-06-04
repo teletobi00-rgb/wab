@@ -105,59 +105,56 @@ function ChatRow({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(c.jid)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect(c.jid);
-        }
-      }}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenuOpen(true);
       }}
-      className={`group relative flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 ${
+      className={`group relative flex w-full text-left transition-colors duration-150 ${
         isSelected ? "bg-wa-panel-hover" : "border-b border-wa-border hover:bg-wa-panel-soft/60"
       }`}
     >
-      <Avatar name={c.name} isGroup={c.isGroup} size="lg" src={c.avatarUrl} />
-      <div className="min-w-0 flex-1 border-b border-transparent">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1">
-            {isPinned ? <span className="shrink-0 text-[11px]">📌</span> : null}
-            {isMuted ? <span className="shrink-0 text-[11px]">🔇</span> : null}
-            <span className="truncate text-[15px] font-medium text-wa-text">{c.name}</span>
-          </span>
-          {c.lastMessageTime ? (
-            <span
-              className={`shrink-0 text-[11px] ${
-                c.unreadCount > 0 ? "text-wa-green" : "text-wa-text-muted"
-              }`}
-            >
-              {formatTime(c.lastMessageTime)}
+      <button
+        type="button"
+        onClick={() => onSelect(c.jid)}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2.5 text-left"
+      >
+        <Avatar name={c.name} isGroup={c.isGroup} size="lg" src={c.avatarUrl} />
+        <div className="min-w-0 flex-1 border-b border-transparent">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1">
+              {isPinned ? <span className="shrink-0 text-[11px]">📌</span> : null}
+              {isMuted ? <span className="shrink-0 text-[11px]">🔇</span> : null}
+              <span className="truncate text-[15px] font-medium text-wa-text">{c.name}</span>
             </span>
-          ) : null}
-        </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          {c.lastMessageFromMe && c.lastMessageStatus ? (
-            <ChatStatusIcon status={c.lastMessageStatus} />
-          ) : null}
-          <span className="min-w-0 flex-1 truncate text-[13px] text-wa-text-muted">
-            {c.lastMessage ?? ""}
-          </span>
-          {c.unreadCount > 0 ? (
-            <span
-              className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${
-                isMuted ? "bg-wa-text-muted/60 text-black/70" : "bg-wa-green text-black/80"
-              }`}
-            >
-              {c.unreadCount}
+            {c.lastMessageTime ? (
+              <span
+                className={`shrink-0 text-[11px] ${
+                  c.unreadCount > 0 ? "text-wa-green" : "text-wa-text-muted"
+                }`}
+              >
+                {formatTime(c.lastMessageTime)}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            {c.lastMessageFromMe && c.lastMessageStatus ? (
+              <ChatStatusIcon status={c.lastMessageStatus} />
+            ) : null}
+            <span className="min-w-0 flex-1 truncate text-[13px] text-wa-text-muted">
+              {c.lastMessage ?? ""}
             </span>
-          ) : null}
+            {c.unreadCount > 0 ? (
+              <span
+                className={`ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${
+                  isMuted ? "bg-wa-text-muted/60 text-black/70" : "bg-wa-green text-black/80"
+                }`}
+              >
+                {c.unreadCount}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
+      </button>
 
       <button
         type="button"

@@ -14,27 +14,16 @@ const svg = await fs.readFile(svgPath);
 
 const icoSizes = [16, 24, 32, 48, 64, 128, 256];
 const icoPngs = await Promise.all(
-  icoSizes.map((size) =>
-    sharp(svg, { density: 384 }).resize(size, size).png().toBuffer(),
-  ),
+  icoSizes.map((size) => sharp(svg, { density: 384 }).resize(size, size).png().toBuffer()),
 );
 const ico = await pngToIco(icoPngs);
 await fs.writeFile(path.join(buildDir, "icon.ico"), ico);
 
-await sharp(svg, { density: 384 })
-  .resize(256, 256)
-  .png()
-  .toFile(path.join(buildDir, "icon.png"));
+await sharp(svg, { density: 384 }).resize(256, 256).png().toFile(path.join(buildDir, "icon.png"));
 
-await sharp(svg, { density: 384 })
-  .resize(32, 32)
-  .png()
-  .toFile(path.join(buildDir, "tray.png"));
+await sharp(svg, { density: 384 }).resize(32, 32).png().toFile(path.join(buildDir, "tray.png"));
 
-await sharp(svg, { density: 384 })
-  .resize(16, 16)
-  .png()
-  .toFile(path.join(buildDir, "tray@2x.png"));
+await sharp(svg, { density: 384 }).resize(16, 16).png().toFile(path.join(buildDir, "tray@2x.png"));
 
 // Small red dot used as the Windows taskbar overlay for unread messages.
 const badgeSvg = Buffer.from(
