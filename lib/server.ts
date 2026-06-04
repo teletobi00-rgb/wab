@@ -168,6 +168,44 @@ ${transcript}`;
   return { ok: true, summary, meta: { messageCount: lines.length, imageCount } };
 }
 
+// Old unbounded *.log files on the /data volume used to fill it up (logs now go
+// to stdout, which the platform captures). On boot in cloud mode, delete stale
+// log files to reclaim space and report current /data usage so disk growth is
+// visible. Runs BEFORE the WhatsApp client so a near-full volume doesn't block
+// Baileys' creds writes.
+async function cleanupAndReportData(): Promise<void> {
+  const authDir = process.env.WAB_AUTH_DIR ?? "";
+  if (!authDir.startsWith("/data")) return; // cloud only
+  try {
+    const items = await fs.readdir("/data", { withFileTypes: true });
+    const report: string[] = [];
+    for (const it of items) {
+      const p = `/data/${it.name}`;
+      if (it.isFile()) {
+        const s = await fs.stat(p).catch(() => null);
+        const mb = s ? s.size / 1024 / 1024 : 0;
+        if (it.name.endsWith(".log")) {
+          await fs.rm(p, { force: true }).catch(() => {});
+          slog(`removed stale log ${it.name} (${mb.toFixed(1)}MB)`);
+        } else {
+          report.push(`${it.name}=${mb.toFixed(1)}MB`);
+        }
+      } else if (it.isDirectory()) {
+        const files = await fs.readdir(p).catch(() => []);
+        let total = 0;
+        for (const f of files) {
+          const s = await fs.stat(`${p}/${f}`).catch(() => null);
+          if (s) total += s.size;
+        }
+        report.push(`${it.name}/=${(total / 1024 / 1024).toFixed(1)}MB(${files.length} files)`);
+      }
+    }
+    slog(`/data usage after cleanup: ${report.join(", ")}`);
+  } catch (err) {
+    slog(`data cleanup/report failed: ${String(err)}`);
+  }
+}
+
 export type StartServerOptions = {
   port: number;
   dir?: string;
@@ -268,6 +306,7 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     slog(`engine connection_error: code=${err.code} msg=${err.message}`);
   });
 
+  await cleanupAndReportData();
   console.log("Initializing WhatsApp client...");
   wa = await initWhatsApp(io);
   console.log("WhatsApp client ready (waiting for QR scan or session restore)");

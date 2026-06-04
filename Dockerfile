@@ -31,7 +31,8 @@ ENV WAB_BIND_HOST=0.0.0.0
 ENV WAB_AUTH_DIR=/data/auth
 ENV WAB_MEDIA_DIR=/data/media
 ENV WAB_ALIAS_FILE=/data/aliases.json
-ENV WAB_LOG_FILE=/data/wab.log
+# NOTE: no WAB_LOG_FILE on purpose. Logs go to stdout (the platform captures
+# them); a file log on /data would grow unbounded and fill the volume.
 
 EXPOSE 3000
 CMD ["npm", "run", "start"]
