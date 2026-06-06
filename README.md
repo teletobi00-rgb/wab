@@ -95,6 +95,7 @@ WAB 접속 시 쓸 **나만의 비밀번호**를 정합니다. 영문+숫자 섞
 | `WAB_GEMINI_API_KEY` | AI 대화 요약용 Gemini 키. 없으면 요약 비활성. ([발급](https://aistudio.google.com/apikey)) |
 | `WAB_SUMMARY_PASSWORD` | AI 요약 비밀번호 (기본 `1812`). |
 | `WAB_GEMINI_MODEL` | Gemini 모델 (선택, 기본 `gemini-2.5-flash`). |
+| `WAB_GEMINI_MAX_OUTPUT_TOKENS` | AI 요약 최대 출력 토큰 (선택, 기본 `8192`). |
 | `WAB_MEDIA_CACHE_MB` | 미디어 캐시 상한(MB). 볼륨보다 작게 (기본 `350`). |
 | `WAB_BIND_HOST` | 바인드 주소. 토큰 있으면 `0.0.0.0`, 없으면 `127.0.0.1`. |
 | `PORT` | 포트 (플랫폼이 자동 주입, 기본 3000) |

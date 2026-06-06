@@ -92,6 +92,7 @@ $env:WAB_ACCESS_TOKEN="test123"; npm run build; npm run start
 2. Railway **Variables** 탭에 추가:
    - `WAB_GEMINI_API_KEY` = 발급받은 키
    - (선택) `WAB_SUMMARY_PASSWORD` = 요약 비밀번호 (기본 `1812`)
+   - (선택) `WAB_GEMINI_MAX_OUTPUT_TOKENS` = 요약 최대 출력 토큰 (기본 `8192`)
 3. 앱에서 채팅 열고 헤더의 **✨ 버튼** → 기간·비밀번호 입력 → 요약.
 
 > ⚠️ API 키는 **서버 환경변수에만** 두세요. 코드에 하드코딩하면 공개 repo에
@@ -105,6 +106,7 @@ $env:WAB_ACCESS_TOKEN="test123"; npm run build; npm run start
 | `WAB_GEMINI_API_KEY` | AI 요약용 Gemini 키 | (없으면 요약 비활성) |
 | `WAB_SUMMARY_PASSWORD` | AI 요약 비밀번호 | `1812` |
 | `WAB_GEMINI_MODEL` | Gemini 모델(선택) | `gemini-2.5-flash` |
+| `WAB_GEMINI_MAX_OUTPUT_TOKENS` | AI 요약 최대 출력 토큰(선택) | `8192` |
 | `WAB_MEDIA_CACHE_MB` | 미디어 캐시 상한(MB). 볼륨보다 작게 | `350` |
 | `WAB_BIND_HOST` | 바인드 주소 | 토큰 있으면 `0.0.0.0`, 없으면 `127.0.0.1` |
 | `PORT` | 포트 | `3000` (플랫폼이 주입) |

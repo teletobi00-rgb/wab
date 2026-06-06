@@ -9,6 +9,8 @@ export type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 let cachedSocket: TypedSocket | null = null;
 
 const TOKEN_KEY = "wab_token";
+const CONNECT_TIMEOUT_MS = 45_000;
+const DISCONNECT_GRACE_MS = 15_000;
 
 export function getStoredToken(): string {
   if (typeof window === "undefined") return "";
@@ -38,7 +40,7 @@ function getSocket(): TypedSocket {
       reconnectionAttempts: Number.POSITIVE_INFINITY,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000,
+      timeout: CONNECT_TIMEOUT_MS,
     }) as TypedSocket;
 
     // Diagnostics: log every connection state transition. In the packaged app
@@ -78,18 +80,41 @@ export function useSocket() {
 
   useEffect(() => {
     const s = getSocket();
+    let hasConnected = s.connected;
+    let disconnectGraceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearDisconnectGrace = () => {
+      if (!disconnectGraceTimer) return;
+      clearTimeout(disconnectGraceTimer);
+      disconnectGraceTimer = null;
+    };
+
     setSocket(s);
     setConnected(s.connected);
 
     const onConnect = () => {
+      hasConnected = true;
+      clearDisconnectGrace();
       setConnected(true);
       setAuthError(false);
     };
-    const onDisconnect = () => setConnected(false);
+    const onDisconnect = () => {
+      clearDisconnectGrace();
+      if (!hasConnected) {
+        setConnected(false);
+        return;
+      }
+      disconnectGraceTimer = setTimeout(() => {
+        disconnectGraceTimer = null;
+        setConnected(false);
+      }, DISCONNECT_GRACE_MS);
+    };
     const onConnectError = (err: Error) => {
       // Server rejected the handshake token (cloud mode) — prompt for a token.
       if (err.message === "unauthorized") {
+        clearDisconnectGrace();
         setAuthError(true);
+        setConnected(false);
         // Stop retrying with the stale token every 1-5s (which would spam the
         // server after a token rotation). applyToken() re-enables reconnection.
         s.io.opts.reconnection = false;
@@ -101,6 +126,7 @@ export function useSocket() {
     s.on("connect_error", onConnectError);
 
     return () => {
+      clearDisconnectGrace();
       s.off("connect", onConnect);
       s.off("disconnect", onDisconnect);
       s.off("connect_error", onConnectError);

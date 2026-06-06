@@ -167,6 +167,7 @@ async function summarizeChat(
 - (중요한 약속·날짜·금액·연락처·링크 등이 있으면. 없으면 이 섹션 생략)
 
 첨부된 이미지가 있으면 그 내용도 요약에 반영하세요.
+응답은 반드시 마지막 섹션까지 완결된 문장으로 끝내고, 중간에 끊긴 듯한 문장으로 마무리하지 마세요.
 
 --- 대화 기록 ---
 ${transcript}`;
@@ -283,6 +284,10 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
   });
 
   const io = new SocketIOServer<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+    // Office/VPN networks can occasionally delay polling/WebSocket heartbeats.
+    // Give the client a longer window before declaring the socket dead, then
+    // the UI-side grace period below smooths over brief reconnects.
+    pingTimeout: 60_000,
     // Only accept WebSocket handshakes whose Origin is a loopback address (or
     // has no Origin header — same-origin / Electron file:// navigations). This
     // blocks a malicious page in another browser tab on the same machine from
