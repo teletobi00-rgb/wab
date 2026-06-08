@@ -30,7 +30,13 @@ ENV WAB_BIND_HOST=0.0.0.0
 # restart doesn't force a fresh QR scan.
 ENV WAB_AUTH_DIR=/data/auth
 ENV WAB_MEDIA_DIR=/data/media
+# Media cache cap (MB). Volume is 5GB; 1000MB leaves ample room for the auth
+# session + persisted state. Oldest media is evicted first once over the cap.
+ENV WAB_MEDIA_CACHE_MB=1000
 ENV WAB_ALIAS_FILE=/data/aliases.json
+# Conversation history (chats + messages) so a redeploy/restart keeps the chats
+# instead of starting from an empty UI.
+ENV WAB_STATE_FILE=/data/state.json
 # NOTE: no WAB_LOG_FILE on purpose. Logs go to stdout (the platform captures
 # them); a file log on /data would grow unbounded and fill the volume.
 

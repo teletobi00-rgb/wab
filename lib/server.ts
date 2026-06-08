@@ -344,9 +344,9 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
     socket.emit("chats", wa.getChats());
     socket.emit("scheduled", wa.getScheduled());
 
-    socket.on("send-message", async ({ jid, text, replyToId, tempId }, ack) => {
+    socket.on("send-message", async ({ jid, text, replyToId, tempId, mentions }, ack) => {
       try {
-        const id = await wa?.sendMessage(jid, text, replyToId, tempId);
+        const id = await wa?.sendMessage(jid, text, replyToId, tempId, mentions);
         ack?.({ ok: true, id });
       } catch (err) {
         console.error("send-message failed", err);
@@ -460,6 +460,15 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
       ack(wa?.getContacts() ?? []);
     });
 
+    socket.on("list-group-members", async ({ jid }, ack) => {
+      try {
+        ack((await wa?.getGroupParticipants(jid)) ?? []);
+      } catch (err) {
+        console.error("list-group-members failed", err);
+        ack([]);
+      }
+    });
+
     socket.on("check-number", async ({ phone }, ack) => {
       try {
         const result = await wa?.checkOnWhatsApp(phone);
@@ -538,6 +547,10 @@ export async function startServer(options: StartServerOptions): Promise<{ port: 
       if (shuttingDown) return;
       shuttingDown = true;
       slog(`${sig} received — shutting down gracefully`);
+      // Persist conversation history before the process dies so a redeploy keeps it.
+      try {
+        wa?.flushState();
+      } catch {}
       try {
         io.close();
       } catch {}

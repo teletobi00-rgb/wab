@@ -3,6 +3,7 @@
 import type { SummaryResult } from "@/lib/socket/events";
 import type {
   ChatInfo,
+  Mention,
   MessageItem,
   MessageStatus,
   PresenceState,
@@ -27,11 +28,12 @@ export function ChatWindow({
   onScheduleMessage,
   onSetAlias,
   onSummarize,
+  onListMembers,
 }: {
   chat: ChatInfo;
   messages: MessageItem[];
   presence: PresenceState | undefined;
-  onSend: (text: string, replyToId?: string) => void;
+  onSend: (text: string, replyToId?: string, mentions?: string[]) => void;
   onTyping: (isTyping: boolean) => void;
   onSendMedia: (
     fileName: string,
@@ -50,6 +52,7 @@ export function ChatWindow({
     to: number | undefined,
     password: string,
   ) => Promise<SummaryResult>;
+  onListMembers: () => Promise<{ jid: string; name: string }[]>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -258,8 +261,8 @@ export function ChatWindow({
   const subtitle =
     presenceText(presence) ?? (chat.isGroup ? "그룹 채팅" : formatJidShort(chat.jid));
 
-  function handleSend(text: string) {
-    onSend(text, replyTo?.id);
+  function handleSend(text: string, mentions?: string[]) {
+    onSend(text, replyTo?.id, mentions);
     setReplyTo(null);
   }
 
@@ -530,6 +533,8 @@ export function ChatWindow({
         onSchedule={onScheduleMessage}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
+        isGroup={chat.isGroup}
+        listMembers={onListMembers}
       />
 
       {isDragging ? <DropOverlay /> : null}
@@ -1369,11 +1374,11 @@ const TEXT_CLASS = "whitespace-pre-wrap break-words leading-relaxed [overflow-wr
 
 // Split text on URLs and render them as external links (opened in the system
 // browser via the window-open handler in the Electron main process).
-function linkify(text: string) {
+function linkify(text: string, keyPrefix = "part") {
   let offset = 0;
   let ordinal = 0;
   return text.split(/(\bhttps?:\/\/[^\s]+)/gi).map((part) => {
-    const key = `part-${offset}-${ordinal++}`;
+    const key = `${keyPrefix}-${offset}-${ordinal++}`;
     offset += part.length;
     return /^https?:\/\//i.test(part) ? (
       <a
@@ -1392,8 +1397,65 @@ function linkify(text: string) {
   });
 }
 
-function LinkifiedText({ text, className }: { text: string; className?: string }) {
-  return <div className={className}>{linkify(text)}</div>;
+// Render message text, replacing each "@<number>" that matches a resolved
+// mention with a styled "@<name>", and linkifying the rest. Numbers with no
+// matching mention are left as-is (e.g. a member we have no name for).
+function renderRichText(text: string, mentions?: Mention[]): ReactNode[] {
+  if (!mentions || mentions.length === 0) return linkify(text);
+  const numToName = new Map(mentions.map((m) => [m.number, m.name]));
+  const out: ReactNode[] = [];
+  // Split URLs out FIRST so a URL containing "@<digits>" (e.g. .../@12345 or
+  // ?ref=@99) isn't fragmented by the mention pass; only the non-URL pieces get
+  // the @number → @name substitution. Offset-based keys stay unique across both.
+  let offset = 0;
+  for (const tok of text.split(/(\bhttps?:\/\/[^\s]+)/gi)) {
+    if (!tok) continue;
+    if (/^https?:\/\//i.test(tok)) {
+      out.push(
+        <a
+          key={`rt-${offset}`}
+          href={tok}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-wa-link underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {tok}
+        </a>,
+      );
+      offset += tok.length;
+      continue;
+    }
+    for (const seg of tok.split(/(@\d+)/g)) {
+      const key = `rt-${offset}`;
+      offset += seg.length;
+      if (!seg) continue;
+      const mm = /^@(\d+)$/.exec(seg);
+      const name = mm ? numToName.get(mm[1]) : undefined;
+      out.push(
+        name ? (
+          <span key={key} className="font-medium text-wa-green">
+            @{name}
+          </span>
+        ) : (
+          <span key={key}>{seg}</span>
+        ),
+      );
+    }
+  }
+  return out;
+}
+
+function LinkifiedText({
+  text,
+  className,
+  mentions,
+}: {
+  text: string;
+  className?: string;
+  mentions?: Mention[];
+}) {
+  return <div className={className}>{renderRichText(text, mentions)}</div>;
 }
 
 function MessageContent({
@@ -1407,7 +1469,7 @@ function MessageContent({
     return <div className="italic text-wa-text-muted">🚫 삭제된 메시지입니다</div>;
   }
   if (message.type === "text" && message.text) {
-    return <LinkifiedText text={message.text} className={TEXT_CLASS} />;
+    return <LinkifiedText text={message.text} mentions={message.mentions} className={TEXT_CLASS} />;
   }
   if (message.media?.url) {
     return <MediaContent message={message} url={message.media.url} onOpenImage={onOpenImage} />;
@@ -1452,7 +1514,11 @@ function MediaContent({
         >
           <img src={url} alt="" className="max-h-80 max-w-full rounded-md object-contain" />
           {message.text ? (
-            <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} />
+            <LinkifiedText
+              text={message.text}
+              mentions={message.mentions}
+              className={`mt-1.5 ${TEXT_CLASS}`}
+            />
           ) : null}
         </button>
       );
@@ -1462,7 +1528,11 @@ function MediaContent({
           {/* biome-ignore lint/a11y/useMediaCaption: WhatsApp video has no captions track */}
           <video controls src={url} className="max-h-80 max-w-full rounded-md" />
           {message.text ? (
-            <LinkifiedText text={message.text} className={`mt-1.5 ${TEXT_CLASS}`} />
+            <LinkifiedText
+              text={message.text}
+              mentions={message.mentions}
+              className={`mt-1.5 ${TEXT_CLASS}`}
+            />
           ) : null}
         </>
       );
@@ -1492,7 +1562,13 @@ function MediaContent({
             <span className="text-xl">📄</span>
             <span className="truncate text-[13px]">{name}</span>
           </a>
-          {caption ? <LinkifiedText text={caption} className={`mt-1.5 ${TEXT_CLASS}`} /> : null}
+          {caption ? (
+            <LinkifiedText
+              text={caption}
+              mentions={message.mentions}
+              className={`mt-1.5 ${TEXT_CLASS}`}
+            />
+          ) : null}
         </>
       );
     }

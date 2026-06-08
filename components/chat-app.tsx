@@ -286,7 +286,7 @@ export function ChatApp() {
             chat={selectedChat}
             messages={selectedMessages}
             presence={selectedPresence}
-            onSend={(text, replyToId) => {
+            onSend={(text, replyToId, mentions) => {
               if (!socket) return;
               // Optimistic add: render the message immediately as "pending".
               // The server echoes back our tempId so onMessageUpsert can swap
@@ -306,7 +306,7 @@ export function ChatApp() {
                 ...prev,
                 [jid]: [...(prev[jid] ?? []), optimistic],
               }));
-              socket.emit("send-message", { jid, text, replyToId, tempId }, (res) => {
+              socket.emit("send-message", { jid, text, replyToId, tempId, mentions }, (res) => {
                 setMessagesByJid((prev) => {
                   const list = prev[jid];
                   if (!list) return prev;
@@ -359,6 +359,15 @@ export function ChatApp() {
                   { jid: selectedChat.jid, from, to, password },
                   resolve,
                 );
+              })
+            }
+            onListMembers={() =>
+              new Promise<{ jid: string; name: string }[]>((resolve) => {
+                if (!socket) {
+                  resolve([]);
+                  return;
+                }
+                socket.emit("list-group-members", { jid: selectedChat.jid }, resolve);
               })
             }
           />

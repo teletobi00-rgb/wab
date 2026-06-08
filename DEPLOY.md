@@ -44,7 +44,8 @@ WhatsApp 연결을 띄우고, 회사 PC는 그 서버에 **HTTPS로 접속만** 
    - `WAB_ACCESS_TOKEN` = (1번에서 만든 토큰)
    - (그 외 `PORT`, `WAB_BIND_HOST`, `WAB_*_DIR`은 Dockerfile에 이미 설정됨)
 5. **Volumes** 탭 → 볼륨 추가, **Mount path = `/data`**.
-   (세션을 영구 저장해서 재시작해도 QR 재스캔이 필요 없게 함)
+   (세션·대화기록·미디어를 영구 저장해서 재배포/재시작해도 QR 재스캔 없이
+   기존 대화가 그대로 유지됨)
 6. **Settings → Networking → Generate Domain** 으로 공개 도메인 생성
    (`xxxx.up.railway.app`).
 7. 회사 PC 브라우저에서 그 도메인 접속 → **토큰 입력** → **QR 스캔** → 끝.
@@ -107,10 +108,11 @@ $env:WAB_ACCESS_TOKEN="test123"; npm run build; npm run start
 | `WAB_SUMMARY_PASSWORD` | AI 요약 비밀번호 | `1812` |
 | `WAB_GEMINI_MODEL` | Gemini 모델(선택) | `gemini-2.5-flash` |
 | `WAB_GEMINI_MAX_OUTPUT_TOKENS` | AI 요약 최대 출력 토큰(선택) | `8192` |
-| `WAB_MEDIA_CACHE_MB` | 미디어 캐시 상한(MB). 볼륨보다 작게 | `350` |
+| `WAB_MEDIA_CACHE_MB` | 미디어 캐시 상한(MB). 볼륨보다 작게 | `1000` (Dockerfile) |
 | `WAB_BIND_HOST` | 바인드 주소 | 토큰 있으면 `0.0.0.0`, 없으면 `127.0.0.1` |
 | `PORT` | 포트 | `3000` (플랫폼이 주입) |
 | `WAB_AUTH_DIR` | Baileys 세션 | `/data/auth` (Dockerfile) |
 | `WAB_MEDIA_DIR` | 미디어 캐시 | `/data/media` |
 | `WAB_ALIAS_FILE` | 별칭 저장 | `/data/aliases.json` |
+| `WAB_STATE_FILE` | 대화 기록(채팅·메시지) 저장 — 재배포해도 유지 | `/data/state.json` |
 | `WAB_LOG_FILE` | 로그 | `/data/wab.log` |

@@ -2,6 +2,7 @@ import type {
   ChatInfo,
   CheckNumberResult,
   ContactItem,
+  GroupMember,
   MessageItem,
   MessageStatusUpdate,
   PresenceUpdate,
@@ -41,7 +42,7 @@ export type ServerToClientEvents = {
 
 export type ClientToServerEvents = {
   "send-message": (
-    data: { jid: string; text: string; replyToId?: string; tempId?: string },
+    data: { jid: string; text: string; replyToId?: string; tempId?: string; mentions?: string[] },
     ack?: (res: SendAck) => void,
   ) => void;
   "send-media": (data: SendMediaPayload, ack?: (res: SendAck) => void) => void;
@@ -59,6 +60,7 @@ export type ClientToServerEvents = {
   typing: (data: { jid: string; isTyping: boolean }) => void;
   "subscribe-presence": (data: { jid: string }) => void;
   "list-contacts": (ack: (contacts: ContactItem[]) => void) => void;
+  "list-group-members": (data: { jid: string }, ack: (members: GroupMember[]) => void) => void;
   "check-number": (data: { phone: string }, ack: (result: CheckNumberResult) => void) => void;
   "start-chat": (data: { jid: string }, ack: (chat: ChatInfo | null) => void) => void;
   "set-alias": (data: { jid: string; name: string }) => void;

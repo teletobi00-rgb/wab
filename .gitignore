@@ -39,3 +39,8 @@ auth_info_baileys/
 
 # Downloaded media (may contain sensitive content)
 media_cache/
+
+# Local-dev persisted state (chat history + aliases — sensitive!)
+wab_state.json
+wab_state.json.tmp
+aliases.json

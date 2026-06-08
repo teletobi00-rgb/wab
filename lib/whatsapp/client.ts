@@ -44,6 +44,10 @@ function resolveAliasFile(): string {
   return process.env.WAB_ALIAS_FILE ?? path.join(process.cwd(), "aliases.json");
 }
 
+function resolveStateFile(): string {
+  return process.env.WAB_STATE_FILE ?? path.join(process.cwd(), "wab_state.json");
+}
+
 type IO = SocketIOServer<ClientToServerEvents, ServerToClientEvents>;
 
 type MediaCacheEntry = {
@@ -251,6 +255,18 @@ export async function initWhatsApp(io: IO) {
   // re-login / restart. jid → custom name.
   const aliases = new Map<string, string>();
   const ALIAS_FILE = resolveAliasFile();
+  // Disk persistence for chats + messages so conversation history survives a
+  // redeploy/restart (the auth session already persists; this adds the history).
+  const STATE_FILE = resolveStateFile();
+  // Trailing-debounce timer for the state write-through; null = none pending.
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Bumped on every wipe (logout/loggedOut) so an async save that was already
+  // in flight can't recreate the state file after it was deleted.
+  let saveEpoch = 0;
+  // Set once on shutdown so the final sync flush wins over any pending save.
+  let shuttingDown = false;
+  // jid → cached group member list, populated on demand for the @-mention picker.
+  const groupParticipants = new Map<string, { jid: string; name: string }[]>();
   // jid → profile picture URL (null = fetched but none / failed, don't retry).
   const avatarCache = new Map<string, string | null>();
   const mediaCache = new Map<string, MediaCacheEntry>();
@@ -323,6 +339,7 @@ export async function initWhatsApp(io: IO) {
   await fs.mkdir(MEDIA_DIR, { recursive: true });
   await rehydrateMediaCache();
   await loadAliases();
+  await loadState();
 
   async function loadAliases() {
     try {
@@ -342,6 +359,132 @@ export async function initWhatsApp(io: IO) {
     } catch (err) {
       console.error("saveAliases failed", err);
     }
+  }
+
+  // Serialize the rendered conversation state to persist across restarts. NOTE:
+  // rawMessages (the original Baileys protobufs) is intentionally NOT persisted —
+  // it's heavy and only needed for actions on live messages. After a restart,
+  // reply-quote / react / forward / delete-for-everyone on messages received in a
+  // PREVIOUS process lifetime degrade gracefully (reply sends without the quote;
+  // delete-for-everyone falls back to a local hide; react/forward no-op).
+  function snapshotState() {
+    return {
+      version: 1,
+      chats: Array.from(chats.values()),
+      messages: Object.fromEntries(messages),
+      contactNames: Object.fromEntries(contactNames),
+      groupSubjects: Object.fromEntries(groupSubjects),
+      lidToPhone: Object.fromEntries(lidToPhone),
+    };
+  }
+
+  async function loadState() {
+    try {
+      const raw = await fs.readFile(STATE_FILE, "utf-8");
+      const data = JSON.parse(raw) as Partial<ReturnType<typeof snapshotState>>;
+      if (data.contactNames) {
+        for (const [k, v] of Object.entries(data.contactNames)) {
+          if (typeof v === "string" && v) contactNames.set(k, v);
+        }
+      }
+      if (data.groupSubjects) {
+        for (const [k, v] of Object.entries(data.groupSubjects)) {
+          if (typeof v === "string" && v) groupSubjects.set(k, v);
+        }
+      }
+      if (data.lidToPhone) {
+        for (const [k, v] of Object.entries(data.lidToPhone)) {
+          if (typeof v === "string" && v) lidToPhone.set(k, v);
+        }
+      }
+      if (Array.isArray(data.chats)) {
+        for (const c of data.chats) {
+          if (c?.jid) chats.set(c.jid, c);
+        }
+      }
+      if (data.messages && typeof data.messages === "object") {
+        for (const [jid, list] of Object.entries(data.messages)) {
+          if (!Array.isArray(list)) continue;
+          // Drop media links whose cached file was already evicted, so the bubble
+          // falls back to a placeholder instead of rendering a broken image.
+          const cleaned = list.map((m) =>
+            m?.media && m.id && !mediaCache.has(m.id)
+              ? { ...m, media: undefined, mediaFailed: true }
+              : m,
+          );
+          if (cleaned.length > MESSAGES_PER_CHAT_CAP) {
+            cleaned.splice(0, cleaned.length - MESSAGES_PER_CHAT_CAP);
+          }
+          messages.set(jid, cleaned);
+        }
+      }
+    } catch {
+      // No saved state yet (first run / fresh login) — start empty.
+    }
+  }
+
+  async function saveStateNow() {
+    if (shuttingDown) return;
+    const myEpoch = saveEpoch;
+    try {
+      const data = JSON.stringify(snapshotState());
+      const tmp = `${STATE_FILE}.tmp`;
+      await fs.writeFile(tmp, data);
+      // A logout wipe or shutdown flush happened while we were writing — don't let
+      // this stale snapshot land on top of the cleared/flushed file.
+      if (shuttingDown || myEpoch !== saveEpoch) {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+        return;
+      }
+      await fs.rename(tmp, STATE_FILE);
+    } catch (err) {
+      console.error("saveState failed", err);
+    }
+  }
+
+  // Throttled write-through: the first mutation schedules a save ~2s out and any
+  // further mutations within that window coalesce into it, so a busy chat writes
+  // at most once per interval instead of on every message.
+  function scheduleSaveState() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      saveStateNow().catch(() => {});
+    }, 2000);
+  }
+
+  // Synchronous final flush for process shutdown (Railway sends SIGTERM, then
+  // SIGKILL ~shortly after — an async write may not land in time, a sync one
+  // does). Written atomically via tmp + rename so a torn file can't result.
+  function flushStateSync() {
+    // Stop any pending/in-flight async save from racing this final write (and
+    // from renaming a stale snapshot over it afterwards).
+    shuttingDown = true;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    try {
+      const fsSync = require("node:fs") as typeof import("node:fs");
+      // Distinct tmp name so it never aliases the async writer's `${STATE_FILE}.tmp`.
+      const tmp = `${STATE_FILE}.flush.tmp`;
+      fsSync.writeFileSync(tmp, JSON.stringify(snapshotState()));
+      fsSync.renameSync(tmp, STATE_FILE);
+    } catch (err) {
+      console.error("flushState failed", err);
+    }
+  }
+
+  async function clearStateFile() {
+    // Bump first so any in-flight saveStateNow aborts its final rename instead of
+    // recreating the file we're about to delete.
+    saveEpoch++;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    await fs.rm(STATE_FILE, { force: true }).catch(() => {});
+    await fs.rm(`${STATE_FILE}.tmp`, { force: true }).catch(() => {});
   }
 
   async function rehydrateMediaCache() {
@@ -433,6 +576,7 @@ export async function initWhatsApp(io: IO) {
   function applyContact(id: string | null | undefined, name: string | null | undefined) {
     if (!id || !name) return;
     contactNames.set(id, name);
+    scheduleSaveState();
     // Reflect the resolved name (alias wins over contact name) onto the chat.
     const chat = chats.get(id);
     const resolved = getDisplayName(id);
@@ -446,6 +590,7 @@ export async function initWhatsApp(io: IO) {
   function applyGroupName(id: string, name: string | null | undefined) {
     if (!id || !name) return;
     groupSubjects.set(id, name);
+    scheduleSaveState();
     const chat = chats.get(id);
     if (chat && (chat.name === "그룹" || chat.name === "Group")) {
       const updated: ChatInfo = { ...chat, name };
@@ -463,6 +608,27 @@ export async function initWhatsApp(io: IO) {
       if (meta.subject) applyGroupName(jid, meta.subject);
     } catch (err) {
       console.error("groupMetadata failed", jid, err);
+    }
+  }
+
+  // Fetch + cache a group's member list (for the @-mention picker). Names are
+  // resolved through the same getDisplayName chain used everywhere else, so a
+  // member we have no metadata for shows as their (formatted) number.
+  async function ensureGroupParticipants(jid: string, force = false): Promise<void> {
+    const key = canonicalJid(jid);
+    if (!key.endsWith("@g.us")) return;
+    if (!force && groupParticipants.has(key)) return;
+    if (!sock || status.state !== "connected") return;
+    try {
+      const meta = await sock.groupMetadata(key);
+      if (meta.subject) applyGroupName(key, meta.subject);
+      const members = (meta.participants ?? []).map((p) => {
+        const pj = canonicalJid(p.id);
+        return { jid: pj, name: getDisplayName(pj) };
+      });
+      groupParticipants.set(key, members);
+    } catch (err) {
+      console.error("groupParticipants failed", key, err);
     }
   }
 
@@ -535,6 +701,7 @@ export async function initWhatsApp(io: IO) {
       avatarUrl: c.avatarUrl ?? existing?.avatarUrl ?? avatarCache.get(c.jid) ?? undefined,
     };
     chats.set(c.jid, merged);
+    scheduleSaveState();
     return merged;
   }
 
@@ -576,6 +743,7 @@ export async function initWhatsApp(io: IO) {
     }
     messages.delete(lid);
 
+    scheduleSaveState();
     io.emit("chats", Array.from(chats.values()));
   }
 
@@ -633,6 +801,18 @@ export async function initWhatsApp(io: IO) {
     if (key.participant?.endsWith("@lid") && key.participantAlt?.endsWith("@s.whatsapp.net")) {
       recordLidMapping(key.participant, key.participantAlt);
     }
+    // @-mentions: WhatsApp puts the mentioned numbers in the visible text and the
+    // real JIDs in contextInfo.mentionedJid. Resolve each to a display name so the
+    // renderer can show "@name" instead of "@<number>".
+    const mentionedJids = extractContextInfo(m.message)?.mentionedJid ?? [];
+    const mentions =
+      mentionedJids.length > 0
+        ? mentionedJids.map((mj) => ({
+            jid: mj,
+            number: mj.split("@")[0] ?? mj,
+            name: getDisplayName(canonicalJid(mj)),
+          }))
+        : undefined;
     const item: MessageItem = {
       id: m.key.id,
       jid: m.key.remoteJid,
@@ -644,6 +824,7 @@ export async function initWhatsApp(io: IO) {
       participantJid: m.key.participant ?? undefined,
       status: mapStatus(m.status),
       quoted: extractQuoted(m),
+      mentions,
     };
     return { item, skip: false };
   }
@@ -762,6 +943,7 @@ export async function initWhatsApp(io: IO) {
           tempId: consumeTempId(merged.id),
         });
       }
+      scheduleSaveState();
       if (needsDownload) scheduleMediaDownload(m, item.jid);
       return;
     }
@@ -842,6 +1024,7 @@ export async function initWhatsApp(io: IO) {
         };
         list[idx] = merged;
         io.emit("message-upsert", { jid, message: merged });
+        scheduleSaveState();
       })
       .catch((err) => console.error("scheduleMediaDownload failed", err));
   }
@@ -884,6 +1067,7 @@ export async function initWhatsApp(io: IO) {
     const merged = { ...list[idx], reactions };
     list[idx] = merged;
     io.emit("message-upsert", { jid, message: merged });
+    scheduleSaveState();
   }
 
   // Mark a stored message as deleted (revoked) and re-emit it.
@@ -901,6 +1085,7 @@ export async function initWhatsApp(io: IO) {
     };
     list[idx] = merged;
     io.emit("message-upsert", { jid, message: merged });
+    scheduleSaveState();
   }
 
   function listScheduled() {
@@ -984,6 +1169,7 @@ export async function initWhatsApp(io: IO) {
         const updated: ChatInfo = { ...chat, unreadCount: 0 };
         chats.set(jid, updated);
         io.emit("chat-update", updated);
+        scheduleSaveState();
       }
     } catch (err) {
       console.error("markRead failed", err);
@@ -1088,6 +1274,8 @@ export async function initWhatsApp(io: IO) {
             contactNames.clear();
             groupSubjects.clear();
             lidToPhone.clear();
+            groupParticipants.clear();
+            await clearStateFile();
             try {
               await fs.rm(AUTH_DIR, { recursive: true, force: true });
               await fs.mkdir(AUTH_DIR, { recursive: true });
@@ -1239,6 +1427,7 @@ export async function initWhatsApp(io: IO) {
             const merged = { ...list[idx], status: newStatus };
             list[idx] = merged;
             io.emit("message-status", { id: u.key.id, jid, status: newStatus });
+            scheduleSaveState();
             // If this is the chat's most recent message, propagate the status
             // to the chat preview so the sidebar's read-receipt indicator updates.
             const chat = chats.get(jid);
@@ -1292,6 +1481,12 @@ export async function initWhatsApp(io: IO) {
         }
       });
 
+      // Membership changes (add/remove/promote) — refresh the cached member list
+      // so the @-mention picker stays current.
+      sock.ev.on("group-participants.update", ({ id }) => {
+        if (id) ensureGroupParticipants(id, true).catch(() => {});
+      });
+
       restarting = false;
     } catch (err) {
       // Don't throw — a failed first connect (e.g. fetchLatestBaileysVersion
@@ -1313,6 +1508,12 @@ export async function initWhatsApp(io: IO) {
     getStatus: () => status,
     getQr: () => currentQr,
     getChats: () => Array.from(chats.values()),
+    getGroupParticipants: async (jid: string) => {
+      await ensureGroupParticipants(jid);
+      return groupParticipants.get(canonicalJid(jid)) ?? [];
+    },
+    // Synchronous best-effort flush of chats/messages to disk before exit.
+    flushState: () => flushStateSync(),
     getContacts: () => {
       const items: { jid: string; name: string; isGroup: boolean }[] = [];
       for (const [jid, name] of contactNames.entries()) {
@@ -1359,10 +1560,15 @@ export async function initWhatsApp(io: IO) {
       text: string,
       replyToId?: string,
       tempId?: string,
+      mentions?: string[],
     ): Promise<string | undefined> => {
       if (!sock || status.state !== "connected") throw new Error("Not connected");
       const quoted = replyToId ? rawMessages.get(replyToId) : undefined;
-      const sent = await sock.sendMessage(jid, { text }, quoted ? { quoted } : undefined);
+      // Baileys maps `mentions` onto contextInfo.mentionedJid, which is what makes
+      // WhatsApp actually ping the listed members (the @<number> in the text alone
+      // does nothing without this).
+      const content = mentions && mentions.length > 0 ? { text, mentions } : { text };
+      const sent = await sock.sendMessage(jid, content, quoted ? { quoted } : undefined);
       const id = sent?.key?.id ?? undefined;
       if (id && tempId) pendingTempIds.set(id, tempId);
       return id;
@@ -1439,7 +1645,11 @@ export async function initWhatsApp(io: IO) {
         if (forEveryone) {
           const raw = rawMessages.get(messageId);
           if (!raw?.key?.remoteJid) {
-            logger.warn({ jid, messageId }, "delete for everyone skipped: raw message missing");
+            // Original proto gone (e.g. message restored from disk after a restart
+            // and never re-seen live). Can't revoke for everyone, but hide it
+            // locally so the action isn't a silent no-op.
+            logger.warn({ jid, messageId }, "delete for everyone unavailable, hiding locally");
+            markDeleted(canonicalJid(jid), messageId);
             return;
           }
           await sock.sendMessage(raw.key.remoteJid, { delete: raw.key });
@@ -1489,6 +1699,13 @@ export async function initWhatsApp(io: IO) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      // Cancel any pending state save before the async logout below yields, so it
+      // can't fire and snapshot data we're about to wipe (clearStateFile's epoch
+      // bump is the backstop for an already-running save).
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
       activeGen++;
       try {
         if (sock) await sock.logout();
@@ -1505,10 +1722,12 @@ export async function initWhatsApp(io: IO) {
       mediaCache.clear();
       mediaTotalBytes = 0;
       lidToPhone.clear();
+      groupParticipants.clear();
       pendingTempIds.clear();
       for (const s of scheduled.values()) clearTimeout(s.timer);
       scheduled.clear();
       emitScheduled();
+      await clearStateFile();
       await fs.rm(AUTH_DIR, { recursive: true, force: true });
       await fs.rm(MEDIA_DIR, { recursive: true, force: true });
       await fs.mkdir(AUTH_DIR, { recursive: true });

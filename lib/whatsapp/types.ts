@@ -55,6 +55,21 @@ export type Reaction = {
   senderName?: string;
 };
 
+// A member referenced via @-mention in a group message. `number` is the digits
+// that appear in the visible text ("@821012345678"); `name` is the resolved
+// display name (falls back to the formatted number when unknown).
+export type Mention = {
+  jid: string;
+  number: string;
+  name: string;
+};
+
+// A group participant, used for the @-mention typeahead in the composer.
+export type GroupMember = {
+  jid: string;
+  name: string;
+};
+
 export type MessageItem = {
   id: string;
   jid: string;
@@ -68,6 +83,8 @@ export type MessageItem = {
   media?: MediaInfo;
   quoted?: QuotedInfo;
   reactions?: Reaction[];
+  // Members @-mentioned in this message, resolved to display names.
+  mentions?: Mention[];
   deleted?: boolean;
   // Set true when the server gave up downloading the attachment (after retries)
   // so the UI can stop showing an infinite "로드 중".

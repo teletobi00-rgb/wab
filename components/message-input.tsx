@@ -1,8 +1,8 @@
 "use client";
 
 import { useTemplates } from "@/lib/templates";
-import type { MessageItem } from "@/lib/whatsapp/types";
-import { useEffect, useRef, useState } from "react";
+import type { GroupMember, MessageItem } from "@/lib/whatsapp/types";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EmojiPicker } from "./emoji-picker";
 
 export function MessageInput({
@@ -12,13 +12,17 @@ export function MessageInput({
   onSchedule,
   replyTo,
   onCancelReply,
+  isGroup,
+  listMembers,
 }: {
-  onSend: (text: string) => void;
+  onSend: (text: string, mentions?: string[]) => void;
   onTyping: (isTyping: boolean) => void;
   onFilesSelected: (files: File[]) => void;
   onSchedule: (text: string, sendAt: number) => void;
   replyTo: MessageItem | null;
   onCancelReply: () => void;
+  isGroup: boolean;
+  listMembers: () => Promise<GroupMember[]>;
 }) {
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -29,6 +33,83 @@ export function MessageInput({
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // @-mention typeahead state (groups only).
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  // Active query after a '@', and where that '@' sits in the text. null = closed.
+  const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  // number → jid for mentions the user actually inserted, so we only ping picked
+  // members (and drop ones they later delete from the text before sending).
+  const pickedRef = useRef<Map<string, string>>(new Map());
+
+  // Fetch the group's member list once when this composer mounts for a group.
+  // listMembers' identity changes each render, so read it through a ref to avoid
+  // refetching in a loop.
+  const listMembersRef = useRef(listMembers);
+  listMembersRef.current = listMembers;
+  useEffect(() => {
+    if (!isGroup) return;
+    let alive = true;
+    listMembersRef
+      .current()
+      .then((m) => {
+        if (alive) setMembers(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isGroup]);
+
+  // Refresh the member list each time the picker opens, so a mid-session add/
+  // remove shows up without re-opening the chat.
+  const mentionOpen = mention !== null;
+  useEffect(() => {
+    if (!isGroup || !mentionOpen) return;
+    let alive = true;
+    listMembersRef
+      .current()
+      .then((m) => {
+        if (alive) setMembers(m);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isGroup, mentionOpen]);
+
+  const mentionMatches = useMemo(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    const list = q
+      ? members.filter(
+          (m) => m.name.toLowerCase().includes(q) || m.jid.split("@")[0].includes(q),
+        )
+      : members;
+    return list.slice(0, 8);
+  }, [mention, members]);
+
+  function selectMember(member: GroupMember) {
+    if (!mention) return;
+    const number = member.jid.split("@")[0];
+    pickedRef.current.set(number, member.jid);
+    const before = text.slice(0, mention.start);
+    const after = text.slice(mention.start + 1 + mention.query.length);
+    const insert = `@${number} `;
+    const next = before + insert + after;
+    setText(next);
+    setMention(null);
+    setTyping(true);
+    const caret = before.length + insert.length;
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(caret, caret);
+      }
+    });
+  }
 
   // Auto-grow the textarea with its content, up to the max-height cap.
   // biome-ignore lint/correctness/useExhaustiveDependencies: text changes must resize the textarea
@@ -57,8 +138,18 @@ export function MessageInput({
     };
   }, [onTyping]);
 
-  function handleChange(value: string) {
+  function handleChange(value: string, caret: number | null) {
     setText(value);
+    // Drop picked mentions whose @<number> token is no longer present, so a
+    // deleted mention isn't pinged on send and a later manual retype behaves the
+    // same as a freshly typed @number.
+    if (pickedRef.current.size > 0) {
+      for (const number of [...pickedRef.current.keys()]) {
+        if (!new RegExp(`(?:^|\\s)@${number}(?:\\s|$)`).test(value)) {
+          pickedRef.current.delete(number);
+        }
+      }
+    }
     if (value.length > 0) {
       setTyping(true);
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
@@ -67,13 +158,34 @@ export function MessageInput({
       setTyping(false);
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
     }
+    // Detect an "@query" token immediately before the caret to open the picker.
+    if (isGroup && caret != null) {
+      const m = /(?:^|\s)@(\S*)$/.exec(value.slice(0, caret));
+      if (m) {
+        setMention({ query: m[1], start: caret - m[1].length - 1 });
+        setMentionIndex(0);
+      } else if (mention) {
+        setMention(null);
+      }
+    } else if (mention) {
+      setMention(null);
+    }
   }
 
   function submit() {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSend(trimmed);
+    // Only ping members whose @<number> token still appears in the final text.
+    const mentions: string[] = [];
+    for (const [number, jid] of pickedRef.current.entries()) {
+      if (new RegExp(`(?:^|\\s)@${number}(?:\\s|$)`).test(trimmed) && !mentions.includes(jid)) {
+        mentions.push(jid);
+      }
+    }
+    onSend(trimmed, mentions.length > 0 ? mentions : undefined);
     setText("");
+    setMention(null);
+    pickedRef.current.clear();
     setTyping(false);
     if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
   }
@@ -114,6 +226,30 @@ export function MessageInput({
           }}
           onClose={() => setScheduleOpen(false)}
         />
+      ) : null}
+      {mention && mentionMatches.length > 0 ? (
+        <div className="absolute bottom-14 left-2 z-30 max-h-56 w-72 overflow-y-auto rounded-xl border border-wa-border bg-wa-panel-soft py-1 shadow-2xl">
+          {mentionMatches.map((m, i) => (
+            <button
+              key={m.jid}
+              type="button"
+              // onMouseDown (not onClick) so the textarea doesn't blur before the
+              // selection is applied.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                selectMember(m);
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-1.5 text-left ${
+                i === mentionIndex ? "bg-wa-panel-hover" : ""
+              }`}
+            >
+              <span className="truncate text-[13px] text-wa-text">{m.name}</span>
+              <span className="ml-auto shrink-0 text-[11px] text-wa-text-muted">
+                {m.jid.split("@")[0]}
+              </span>
+            </button>
+          ))}
+        </div>
       ) : null}
       <div className="flex items-center gap-2 px-3 py-2.5">
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFile} />
@@ -172,8 +308,32 @@ export function MessageInput({
           ref={taRef}
           value={text}
           rows={1}
-          onChange={(e) => handleChange(e.target.value)}
+          onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
           onKeyDown={(e) => {
+            // While the @-mention picker is open, arrows move the highlight and
+            // Enter/Tab pick the member instead of sending.
+            if (mention && mentionMatches.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                return;
+              }
+              if ((e.key === "Enter" || e.key === "Tab") && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                selectMember(mentionMatches[mentionIndex]);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setMention(null);
+                return;
+              }
+            }
             // Enter sends; Shift+Enter inserts a newline (textarea default).
             // isComposing guard: don't send mid-Hangul-composition (the last
             // jamo would be cut off).
